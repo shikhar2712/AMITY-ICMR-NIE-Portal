@@ -352,7 +352,7 @@ def main():
                             saved_id = save_prediction_to_db(
                                 patient_data=patient_data,
                                 prediction_result=prediction_result,
-                                model_info={'model1': 'XGB_M1_16JAN', 'model2': 'xgb_filtered_model2'},
+                                model_info={'model1': 'CustomMajor', 'model2': 'CustomOther'},
                                 state_name=selected_state_name,
                                 district_name=selected_district_name
                             )
