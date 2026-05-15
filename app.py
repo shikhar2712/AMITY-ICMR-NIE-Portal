@@ -216,9 +216,10 @@ def main():
         # Temporal features
         current_month = datetime.now().month
         patient_data['month'] = st.sidebar.selectbox("Month of Illness", options=list(range(1, 13)), 
-                                                      index=current_month - 1,  # index is 0-based
-                                                      format_func=lambda x: datetime(2000, x, 1).strftime('%B'))
-        patient_data['year'] = st.sidebar.number_input("Year", min_value=2012, max_value=2026, value=datetime.now().year)
+                                  index=current_month - 1,  # index is 0-based
+                                  format_func=lambda x: datetime(2000, x, 1).strftime('%B'))
+        # Year is fixed to 2015 for model input (hidden from UI)
+        patient_data['year'] = 2015
 
         # Syndrome Selection
         st.header("Syndrome Classification")
