@@ -6,7 +6,8 @@ from datetime import datetime
 # Model and prediction imports
 from model_handler import (
     VirusPredictor, get_virus_predictor, refresh_virus_mappings,
-    VIRUS_MAPPING, OTHER_VIRUS_MAPPING, COMBINED_VIRUS_MAPPING, ALL_SYMPTOMS
+    VIRUS_MAPPING, OTHER_VIRUS_MAPPING, COMBINED_VIRUS_MAPPING, ALL_SYMPTOMS,
+    SYNDROME_MAPPING, SYNDROME_DISPLAY_MAPPING
 )
 
 refresh_virus_mappings()
@@ -223,51 +224,42 @@ def main():
         st.header("Syndrome Classification")
         st.write("Select the primary syndrome that best describes the patient's condition:")
         
-        # Syndrome options mapping
-        SYNDROME_OPTIONS = {
-            1: "Acute Diarrheal Disease",
-            2: "Dysentery", 
-            3: "Acute Flaccid Paralysis",
-            4: "Acute Hepatitis",
-            5: "ARI/Influenza Like Illness (ILI)",
-            6: "Fever with Altered sensorium",
-            7: "Severe Acute Respiratory Infection (SARI)",
-            8: "Cough <= 2 weeks without fever",
-            9: "Cough <=2 weeks with fever",
-            10: "Cough > 2 weeks with fever",
-            11: "Acute Encephalitis Syndrome (AES)",
-            12: "Conjunctivitis",
-            13: "Fever with Bleeding",
-            14: "Fever with Rash",
-            15: "Hemorrhagic fever",
-            16: "Jaundice of < 4 weeks",
-            17: "Only Fever < 7 days",
-            18: "Fever >= 7 days",
-            19: "Other",
-        }
-        
-        # Syndrome selection dropdown
-        syndrome_options = list(SYNDROME_OPTIONS.keys())
-        selected_syndrome = st.selectbox(
-            "Primary Syndrome",
-            options=syndrome_options,
-            format_func=lambda x: SYNDROME_OPTIONS[x],
-            help="Select the syndrome that best matches the clinical presentation"
-        )
-        
-        patient_data['syndrome'] = selected_syndrome
-        patient_data['syndrome_name'] = SYNDROME_OPTIONS[selected_syndrome]
-        
-        # If "Other" is selected, provide text input for specification
-        if selected_syndrome == 19:
-            other_syndrome = st.text_input(
-                "Please specify the syndrome:",
-                placeholder="Enter the specific syndrome...",
-                help="Describe the specific syndrome not listed above"
+        # Use Overall_Syndromes for display (from SyndromeMapping.csv)
+        if SYNDROME_DISPLAY_MAPPING:
+            syndrome_options = sorted(list(SYNDROME_DISPLAY_MAPPING.keys()))
+            selected_syndrome_display = st.selectbox(
+                "Primary Syndrome",
+                options=syndrome_options,
+                help="Select the syndrome that best matches the clinical presentation"
             )
-            patient_data['other_syndrome_specification'] = other_syndrome
+            # Map display name to encoded value
+            selected_syndrome_encoded = SYNDROME_DISPLAY_MAPPING[selected_syndrome_display]
+            patient_data['Syndrome_encoded'] = int(selected_syndrome_encoded)
+            patient_data['syndrome'] = int(selected_syndrome_encoded)
+            patient_data['syndrome_name'] = selected_syndrome_display
         else:
-            patient_data['other_syndrome_specification'] = ""
+            # Fallback to hardcoded list if mapping is empty
+            syndrome_map = {
+                0: "ARI/Influenza Like Illness (ILI)",
+                1: "Acute Diarrheal Disease",
+                2: "Acute Encephalitis Syndrome (AES)",
+                3: "Conjunctivitis",
+                4: "Fever with Rash",
+                5: "Hemorrhagic fever",
+                6: "Jaundice of < 4 weeks",
+                7: "Only Fever < 7 days",
+                8: "Severe Acute Respiratory Infection (SARI)",
+            }
+            syndrome_options = sorted(list(syndrome_map.keys()))
+            selected_syndrome_encoded = st.selectbox(
+                "Primary Syndrome",
+                options=syndrome_options,
+                format_func=lambda x: syndrome_map.get(x, str(x)),
+                help="Select the syndrome that best matches the clinical presentation"
+            )
+            patient_data['Syndrome_encoded'] = int(selected_syndrome_encoded)
+            patient_data['syndrome'] = int(selected_syndrome_encoded)
+            patient_data['syndrome_name'] = syndrome_map.get(selected_syndrome_encoded, "")
         
         st.markdown("---")
 

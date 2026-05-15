@@ -1,0 +1,10 @@
+Syndrome_Label,Encoded_Value,Sample_Count
+ARI/Influenza Like Illness (ILI),0,20994
+Acute Diarrheal Disease,1,28210
+Acute Encephalitis Syndrome (AES),2,13658
+Conjunctivitis,3,493
+Fever with Rash,4,22582
+Hemorrhagic fever,5,91504
+Jaundice of < 4 weeks,6,82691
+Only Fever < 7 days,7,164031
+Severe Acute Respiratory Infection (SARI),8,57525

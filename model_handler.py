@@ -20,7 +20,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 # VIRUS & SYMPTOM MAPPINGS
 # ============================================================================
 
-# Main virus mapping (26 classes)
+
+# Main virus mapping loaded from CSV at runtime.
 DEFAULT_VIRUS_MAPPING = {
     0: 'Chikungunya Virus',
     1: 'Dengue Virus',
@@ -29,7 +30,7 @@ DEFAULT_VIRUS_MAPPING = {
     4: 'Hepatitis B Virus',
     5: 'Hepatitis C Virus',
     6: 'Hepatitis E Virus',
-    7: 'Herpes simplex virus',
+    7: 'Herpes Simplex Virus (HSV)',
     8: 'Influenza A H1N1',
     9: 'Influenza A H3N2',
     10: 'Influenza B Victoria',
@@ -37,64 +38,92 @@ DEFAULT_VIRUS_MAPPING = {
     12: 'Leptospira',
     13: 'Measles Virus',
     14: 'Mumps Virus',
-    15: 'OtherViruses',
+    15: 'Other_Viruses',
     16: 'Parvovirus',
     17: 'Respiratory Adenovirus',
-    18: 'Respiratory Syncytial Virus RSV',
-    19: 'Respiratory Syncytial Virus-A RSV-A',
-    20: 'Respiratory Syncytial Virus-B RSV-B',
-    21: 'Rotavirus',
-    22: 'Rubella',
-    23: 'SARS-Cov-2',
-    24: 'Scrub typhus Orientia tsutsugamushi',
-    25: 'Varicella zoster virus VZV'
+    18: 'Respiratory Syncytial Virus (RSV)',
+    19: 'Rotavirus',
+    20: 'Rubella',
+    21: 'SARS-Cov-2',
+    22: 'Scrub typhus (Orientia tsutsugamushi)',
+    23: 'Varicella zoster virus (VZV)',
 }
 
-# Other Virus sub-classification mapping (13 classes)
+# Other Virus sub-classification mapping loaded from CSV at runtime.
 DEFAULT_OTHER_VIRUS_MAPPING = {
-    0: 'HIV',
-    1: 'Haemophilus influenzae',
-    2: 'Herpes simplex virus (HSV)',
-    3: 'Human papillomavirus (HPV)',
-    4: 'Kyasanur Forest Disease',
-    5: 'Metapneumovirus',
-    6: 'Norovirus',
-    7: 'Other Influenza',
-    8: 'Rhinovirus',
-    9: 'Toxoplasma',
-    10: 'Unknown',
-    11: 'West Nile virus (WNV)',
-    12: 'Zika'
+    0: 'Human papillomavirus (HPV)',
+    1: 'Kyasanur Forest Disease',
+    2: 'Metapneumovirus',
+    3: 'Norovirus',
+    4: 'Other Influenza',
+    5: 'Rhinovirus',
+    6: 'West Nile virus (WNV)',
+    7: 'Zika',
+}
+
+DEFAULT_SYNDROME_MAPPING = {
+    0: 'ARI/Influenza Like Illness (ILI)',
+    1: 'Acute Diarrheal Disease',
+    2: 'Acute Encephalitis Syndrome (AES)',
+    3: 'Conjunctivitis',
+    4: 'Fever with Rash',
+    5: 'Hemorrhagic fever',
+    6: 'Jaundice of < 4 weeks',
+    7: 'Only Fever < 7 days',
+    8: 'Severe Acute Respiratory Infection (SARI)',
 }
 
 VIRUS_MAPPING = dict(DEFAULT_VIRUS_MAPPING)
 OTHER_VIRUS_MAPPING = dict(DEFAULT_OTHER_VIRUS_MAPPING)
 COMBINED_VIRUS_MAPPING = {}
+SYNDROME_MAPPING = dict(DEFAULT_SYNDROME_MAPPING)
+SYNDROME_DISPLAY_MAPPING = {}  # Maps Overall_Syndromes -> Encoded_Value for UI display
 
 
-def _read_virus_mapping_csv(csv_path, expected_count=None):
-    df = pd.read_csv(csv_path)
-    required_cols = {"Original", "Encoded"}
+def _try_read_csv(csv_path, encodings=['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']):
+    """Try to read CSV with multiple encodings to handle encoding issues."""
+    for encoding in encodings:
+        try:
+            return pd.read_csv(csv_path, encoding=encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    raise ValueError(f"Could not read CSV {csv_path} with any of the attempted encodings: {encodings}")
+
+
+def _read_label_mapping_csv(csv_path, label_column, encoded_column):
+    df = _try_read_csv(csv_path)
+    required_cols = {label_column, encoded_column}
     if not required_cols.issubset(df.columns):
         raise ValueError(
             f"Invalid mapping file: {csv_path}. Expected columns: {required_cols}."
         )
 
-    df = df.dropna(subset=["Original", "Encoded"])
-    df["Encoded"] = df["Encoded"].astype(int)
-    mapping = dict(zip(df["Encoded"], df["Original"].astype(str)))
+    df = df.dropna(subset=[label_column, encoded_column])
+    df[encoded_column] = df[encoded_column].astype(int)
+    return dict(zip(df[encoded_column], df[label_column].astype(str)))
 
-    if expected_count is not None and len(mapping) != expected_count:
-        st.warning(
-            f"Mapping size mismatch for {csv_path}. Expected {expected_count}, got {len(mapping)}."
+
+def _read_syndrome_display_mapping_csv(csv_path):
+    """Load syndrome display mapping from SyndromeMapping.csv
+    Returns: dict mapping Overall_Syndromes -> Encoded_Value
+    """
+    df = _try_read_csv(csv_path)
+    required_cols = {'Overall_Syndromes', 'Encoded_Value'}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"Invalid syndrome mapping file: {csv_path}. Expected columns: {required_cols}."
         )
-
-    return mapping
+    
+    df = df.dropna(subset=['Overall_Syndromes', 'Encoded_Value'])
+    df['Encoded_Value'] = df['Encoded_Value'].astype(int)
+    # Remove duplicates by keeping first occurrence (they map to same encoded value anyway)
+    return dict(zip(df['Overall_Syndromes'].astype(str), df['Encoded_Value']))
 
 
 def refresh_virus_mappings(
     major_csv_path=None,
     other_csv_path=None,
+    syndrome_csv_path=None,
 ):
     """
     Reload virus name mappings from CSV files and update in place.
@@ -106,13 +135,15 @@ def refresh_virus_mappings(
     base_dir = Path(__file__).resolve().parent
     major_csv_path = major_csv_path or base_dir / "encoding_major_VIRUS_NAME.csv"
     other_csv_path = other_csv_path or base_dir / "encoding_other_VIRUS_NAME.csv"
+    syndrome_csv_path = syndrome_csv_path or base_dir / "SyndromeMapping.csv"
 
     major_mapping = dict(DEFAULT_VIRUS_MAPPING)
     other_mapping = dict(DEFAULT_OTHER_VIRUS_MAPPING)
+    syndrome_mapping = dict(DEFAULT_SYNDROME_MAPPING)
 
     try:
         if Path(major_csv_path).exists():
-            major_mapping = _read_virus_mapping_csv(major_csv_path, expected_count=26)
+            major_mapping = _read_label_mapping_csv(major_csv_path, "Original", "Encoded")
         else:
             st.warning(f"Major mapping file not found: {major_csv_path}")
     except Exception as exc:
@@ -120,17 +151,41 @@ def refresh_virus_mappings(
 
     try:
         if Path(other_csv_path).exists():
-            other_mapping = _read_virus_mapping_csv(other_csv_path, expected_count=13)
+            other_mapping = _read_label_mapping_csv(other_csv_path, "Original", "Encoded")
         else:
             st.warning(f"Other mapping file not found: {other_csv_path}")
     except Exception as exc:
         st.warning(f"Failed to load other mapping from CSV: {exc}")
+
+    # Load syndrome display mapping (Overall_Syndromes -> Encoded_Value)
+    syndrome_display_mapping = dict()
+    try:
+        if Path(syndrome_csv_path).exists():
+            syndrome_display_mapping = _read_syndrome_display_mapping_csv(syndrome_csv_path)
+            # Also extract Syndrome_Label -> Encoded_Value for backward compatibility
+            df = _try_read_csv(syndrome_csv_path)
+            df = df.dropna(subset=['Syndrome_Label', 'Encoded_Value'])
+            df['Encoded_Value'] = df['Encoded_Value'].astype(int)
+            syndrome_mapping = dict(zip(df['Encoded_Value'], df['Syndrome_Label'].astype(str)))
+            syndrome_mapping = dict.fromkeys(syndrome_mapping.values(), -1)  # Reset
+            for idx, label in zip(df['Encoded_Value'], df['Syndrome_Label'].astype(str)):
+                syndrome_mapping[idx] = label
+        else:
+            st.warning(f"Syndrome mapping file not found: {syndrome_csv_path}")
+    except Exception as exc:
+        st.warning(f"Failed to load syndrome mapping from CSV: {exc}")
 
     VIRUS_MAPPING.clear()
     VIRUS_MAPPING.update(major_mapping)
 
     OTHER_VIRUS_MAPPING.clear()
     OTHER_VIRUS_MAPPING.update(other_mapping)
+
+    SYNDROME_MAPPING.clear()
+    SYNDROME_MAPPING.update(syndrome_mapping)
+
+    SYNDROME_DISPLAY_MAPPING.clear()
+    SYNDROME_DISPLAY_MAPPING.update(syndrome_display_mapping)
 
     COMBINED_VIRUS_MAPPING.clear()
     COMBINED_VIRUS_MAPPING.update(
@@ -163,38 +218,37 @@ ALL_SYMPTOMS = [
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ============================================================================
-# TABULARRESNET ARCHITECTURE (from notebook)
+# GRTT ARCHITECTURE (updated runtime model)
 # ============================================================================
+
 
 class GEGLU(nn.Module):
     """Gated Linear Unit with GELU activation"""
-    def __init__(self, d_model, d_ff):
+
+    def __init__(self, d_model: int, d_ff: int):
         super().__init__()
         self.fc1 = nn.Linear(d_model, d_ff * 2)
         self.fc2 = nn.Linear(d_ff, d_model)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         a, b = self.fc1(x).chunk(2, dim=-1)
         return self.fc2(a * F.gelu(b))
 
 
 class TransformerBlock(nn.Module):
     """Transformer block with gated residual connections"""
-    def __init__(self, d_model=128, n_heads=4, d_ff=256, dropout=0.1):
+
+    def __init__(self, d_model: int = 128, n_heads: int = 4, d_ff: int = 256, dropout: float = 0.2):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(
-            d_model, n_heads, dropout=dropout, batch_first=True
-        )
+        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
         self.ln2 = nn.LayerNorm(d_model)
         self.ff = GEGLU(d_model, d_ff)
-
-        # Simple learnable gating (proven stable)
         self.attn_gate = nn.Parameter(torch.zeros(1))
         self.ff_gate = nn.Parameter(torch.zeros(1))
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.ln1(x)
         attn_out, _ = self.attn(h, h, h, need_weights=False)
         x = x + torch.sigmoid(self.attn_gate) * self.drop(attn_out)
@@ -207,133 +261,117 @@ class TransformerBlock(nn.Module):
 
 class TabularResNet(nn.Module):
     """
-    Enhanced TabularResNet for virus classification with:
-    - FT-Transformer style continuous feature tokenization
-    - Improved projection head for contrastive learning
-    - Stable architecture without BatchNorm issues
+    Updated runtime architecture for the virus classifier.
+
+    The class name is preserved for compatibility with the existing app and
+    older checkpoints, but the implementation matches the updated GRTT design.
     """
-    def __init__(self, num_binary, num_continuous, cat_dims,
-                 num_classes, d_token=256, depth=2, dropout=0.1):
+
+    def __init__(
+        self,
+        num_binary,
+        num_continuous,
+        cat_dims,
+        num_classes,
+        d_token: int = 128,
+        depth: int = 2,
+        n_heads: int = 4,
+        dropout: float = 0.2,
+        token_drop: float = 0.05,
+    ):
         super().__init__()
 
         self.num_cat = len(cat_dims)
         self.num_continuous = num_continuous
+        self.token_drop = token_drop
 
-        # ---------- Categorical Embeddings ----------
-        self.cat_embeds = nn.ModuleList([
-            nn.Embedding(card, emb) for card, emb in cat_dims
-        ])
-        self.cat_proj = nn.ModuleList([
-            nn.Linear(emb, d_token) for _, emb in cat_dims
-        ])
+        self.cat_embeds = nn.ModuleList([nn.Embedding(card, emb) for card, emb in cat_dims])
+        self.cat_proj = nn.ModuleList([nn.Linear(emb, d_token) for _, emb in cat_dims])
+        self.cont_proj = nn.ModuleList([nn.Linear(1, d_token) for _ in range(num_continuous)])
+        self.cont_scale = nn.ParameterList([nn.Parameter(torch.ones(d_token)) for _ in range(num_continuous)])
 
-        # ---------- Continuous Features ----------
-        # 🔹 IMPROVEMENT: FT-Transformer style tokenization
-        # Learnable scaling for better feature representation
-        self.cont_proj = nn.ModuleList([
-            nn.Linear(1, d_token) for _ in range(num_continuous)
-        ])
-        self.cont_scale = nn.ParameterList([
-            nn.Parameter(torch.ones(d_token)) for _ in range(num_continuous)
-        ])
-
-        # ---------- Binary Features ----------
         self.bin_linear = nn.Linear(num_binary, d_token)
         self.bin_gate = nn.Parameter(torch.zeros(1))
 
-        # ---------- Token Management ----------
         self.max_tokens = 1 + self.num_cat + num_continuous + (1 if num_binary > 0 else 0)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_token))
         self.pos_embed = nn.Parameter(torch.zeros(1, self.max_tokens, d_token))
 
-        # ---------- Transformer Blocks ----------
         self.blocks = nn.ModuleList([
-            TransformerBlock(d_token, dropout=dropout) for _ in range(depth)
+            TransformerBlock(d_model=d_token, n_heads=n_heads, d_ff=d_token * 2, dropout=dropout)
+            for _ in range(depth)
         ])
-
         self.norm = nn.LayerNorm(d_token)
-
-        # 🔹 IMPROVEMENT: Enhanced projection head (NO BatchNorm for stability)
         self.proj_head = nn.Sequential(
             nn.Linear(d_token, d_token * 2),
             nn.ReLU(inplace=True),
-            # nn.Dropout(dropout),
+            nn.Dropout(dropout),
             nn.Linear(d_token * 2, d_token),
             nn.ReLU(inplace=True),
-            nn.Linear(d_token, 128)
+            nn.Linear(d_token, 128),
         )
-
-        # Classification head
         self.head = nn.Linear(d_token, num_classes)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.trunc_normal_(module.weight, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.trunc_normal_(module.weight, std=0.02)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.ones_(module.weight)
+                nn.init.zeros_(module.bias)
+
     def forward(self, xb, xc, xcat, return_embed=False):
-        """
-        Forward pass through the model.
-        
-        Args:
-            xb: Binary features [batch_size, num_binary]
-            xc: Continuous features [batch_size, num_continuous]  
-            xcat: Categorical features [batch_size, num_categorical]
-            return_embed: If True, return (pooled, z) for contrastive learning
-        
-        Returns:
-            If return_embed: (pooled_features, contrastive_embeddings)
-            Else: class_logits
-        """
         B = xb.size(0)
         tokens = []
 
-        # ---------- Categorical Tokens ----------
         for i in range(self.num_cat):
             cat_emb = self.cat_embeds[i](xcat[:, i])
             tokens.append(self.cat_proj[i](cat_emb).unsqueeze(1))
 
-        # ---------- Continuous Tokens ----------
-        # 🔹 Apply learnable feature-specific scaling
         for i in range(self.num_continuous):
-            cont_token = self.cont_proj[i](xc[:, i:i+1])
-            cont_token = cont_token * self.cont_scale[i]  # Feature-specific scaling
+            cont_token = self.cont_proj[i](xc[:, i:i + 1]) * self.cont_scale[i]
             tokens.append(cont_token.unsqueeze(1))
 
-        # ---------- Binary Token ----------
-        if xb.numel() > 0:
+        if xb.size(1) > 0:
             bin_emb = torch.sigmoid(self.bin_gate) * self.bin_linear(xb)
             tokens.append(bin_emb.unsqueeze(1))
 
-        # ---------- Combine Tokens ----------
-        x = torch.cat(tokens, dim=1) if tokens else torch.randn(B, 1, 256).to(DEVICE)
+        x = torch.cat(tokens, dim=1)
         cls = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls, x], dim=1)  # [B, 1 + num_tokens, d_token]
+        x = torch.cat([cls, x], dim=1)
 
-        # # ---------- Token Dropout (Training Only) ----------
-        # if self.training:
-        #     keep = (torch.rand(x.size(1), device=x.device) > 0.1)
-        #     keep[0] = True  # Always keep CLS token
-        #     x = x[:, keep, :]
-        #     pos_embed_used = self.pos_embed[:, :self.max_tokens, :][:, keep, :]
-        # else:
-        #     pos_embed_used = self.pos_embed[:, :x.size(1), :]
+        if self.training and self.token_drop > 0.0:
+            keep = torch.rand(x.size(1), device=x.device) > self.token_drop
+            keep[0] = True
+            x = x[:, keep, :]
+            pos_embed_used = self.pos_embed[:, :self.max_tokens, :][:, keep, :]
+        else:
+            pos_embed_used = self.pos_embed[:, :x.size(1), :]
 
-        pos_embed_used = self.pos_embed[:, :x.size(1), :]
-        # Add positional embeddings
         x = x + pos_embed_used
 
-        # ---------- Transformer Blocks ----------
         for blk in self.blocks:
             x = blk(x)
 
         x = self.norm(x)
-
-        # ---------- Pooling ----------
-        # Use proven 70-30 weighted pooling
         pooled = 0.7 * x[:, 0] + 0.3 * x[:, 1:].mean(dim=1)
 
-        # ---------- Return Embeddings or Logits ----------
         if return_embed:
             z = F.normalize(self.proj_head(pooled), dim=1)
             return pooled, z
 
         return self.head(pooled)
+
+
+GRTT = TabularResNet
 
 
 # ============================================================================
@@ -346,8 +384,8 @@ class VirusPredictor:
     Loads bundled .pth files with model weights + preprocessing objects.
     """
     
-    def __init__(self, model1_path='models/CustomMajor.pth', 
-                 model2_path='models/CustomOther.pth'):
+    def __init__(self, model1_path='models/grtt_major_production.pth', 
+                 model2_path='models/grtt_other_production.pth'):
         """
         Initialize predictor by loading both pretrained models.
         
@@ -359,6 +397,8 @@ class VirusPredictor:
         self.model2 = None
         self.preprocessing1 = None
         self.preprocessing2 = None
+        self.model_info1 = {}
+        self.model_info2 = {}
         self.load_models(model1_path, model2_path)
     
     def load_models(self, model1_path, model2_path):
@@ -392,24 +432,24 @@ class VirusPredictor:
                         # )
                         return torch.load(path, map_location=DEVICE, weights_only=False)
 
-            # Load Model 1 (Primary - 26 viruses)
             checkpoint1 = _safe_torch_load(model1_path)
-            config1 = checkpoint1['model_config']
-            self.model1 = TabularResNet(**config1).to(DEVICE)
-            self.model1.load_state_dict(checkpoint1['model_state_dict'])
-            self.model1.eval()
-            self.preprocessing1 = checkpoint1['preprocessing']
-            self._normalize_imputer_state(self.preprocessing1)
-            
-            # Load Model 2 (Secondary - Other Viruses)
+            self.model1, self.preprocessing1, self.model_info1 = self._load_single_model_bundle(checkpoint1)
+
             checkpoint2 = _safe_torch_load(model2_path)
-            config2 = checkpoint2['model_config']
-            self.model2 = TabularResNet(**config2).to(DEVICE)
-            self.model2.load_state_dict(checkpoint2['model_state_dict'])
-            self.model2.eval()
-            self.preprocessing2 = checkpoint2['preprocessing']
-            self._normalize_imputer_state(self.preprocessing2)
-            
+            self.model2, self.preprocessing2, self.model_info2 = self._load_single_model_bundle(checkpoint2)
+            # Warn if syndrome feature is not present in categorical columns of either model
+            def _has_syndrome_feature(preproc):
+                cat_cols = preproc.get('cat_cols', []) if preproc else []
+                for name in cat_cols:
+                    if 'syndrom' in name.lower() or 'syndrome' in name.lower():
+                        return True
+                return False
+
+            if not _has_syndrome_feature(self.preprocessing1):
+                st.warning("Primary model loaded does not include a syndrome categorical column — syndrome will not be used by this model unless retrained with that feature.")
+            if not _has_syndrome_feature(self.preprocessing2):
+                st.info("Secondary model loaded does not include a syndrome categorical column — if you expect syndrome input for sub-classification, retrain the secondary model including that feature.")
+
             return True
             
         except FileNotFoundError as e:
@@ -421,11 +461,8 @@ class VirusPredictor:
 
     @staticmethod
     def _normalize_imputer_state(preprocessing):
-        """
-        Backfill SimpleImputer attributes for cross-version sklearn compatibility.
-        Older pickles may miss _fill_dtype, which newer versions access during transform.
-        """
-        for key in ('imp_cont', 'imp_bin'):
+        """Backfill SimpleImputer attributes for cross-version sklearn compatibility."""
+        for key in ('imp_cont', 'imp_bin', 'imputer'):
             imputer = preprocessing.get(key)
             if isinstance(imputer, SimpleImputer) and not hasattr(imputer, '_fill_dtype'):
                 if hasattr(imputer, '_fit_dtype'):
@@ -434,6 +471,42 @@ class VirusPredictor:
                     imputer._fill_dtype = np.asarray(imputer.statistics_).dtype
                 else:
                     imputer._fill_dtype = np.dtype('float64')
+
+    def _load_single_model_bundle(self, checkpoint):
+        """Normalize old and new checkpoint formats into a common runtime shape."""
+        config = checkpoint.get('model_config')
+        if config is None:
+            raise ValueError('Checkpoint is missing model_config.')
+
+        model = TabularResNet(**config).to(DEVICE)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+
+        if 'preprocessing' in checkpoint:
+            preprocessing = dict(checkpoint['preprocessing'])
+        else:
+            preprocessing = {
+                'binary_cols': checkpoint.get('binary_cols', []),
+                'cont_cols': checkpoint.get('cont_cols', []),
+                'cat_cols': checkpoint.get('cat_cols', []),
+                'imputer': checkpoint.get('imputer'),
+                'scaler': checkpoint.get('scaler'),
+                'cat_encoders': checkpoint.get('cat_encoders', {}),
+            }
+
+        preprocessing.setdefault('imp_cont', preprocessing.get('imputer'))
+        preprocessing.setdefault('imp_bin', None)
+        preprocessing.setdefault('le_dict', preprocessing.get('cat_encoders', {}))
+        self._normalize_imputer_state(preprocessing)
+
+        info = {
+            'virus_mapping': checkpoint.get('virus_mapping', {}),
+            'best_acc': checkpoint.get('best_acc'),
+            'best_f1_macro': checkpoint.get('best_f1_macro'),
+            'best_epoch': checkpoint.get('best_epoch'),
+        }
+
+        return model, preprocessing, info
     
     def preprocess_features(self, patient_data, preprocessing):
         """
@@ -449,15 +522,14 @@ class VirusPredictor:
             Tuple of (xb, xc, xcat) PyTorch tensors ready for model inference
         """
         try:
-            binary_cols = preprocessing['binary_cols']
-            cat_cols = preprocessing['cat_cols']
-            cont_cols = preprocessing['cont_cols']
-            imp_cont = preprocessing['imp_cont']
-            scaler = preprocessing['scaler']
-            imp_bin = preprocessing['imp_bin']
-            le_dict = preprocessing['le_dict']
-            
-            # Create DataFrame for easier handling
+            binary_cols = preprocessing.get('binary_cols', [])
+            cat_cols = preprocessing.get('cat_cols', [])
+            cont_cols = preprocessing.get('cont_cols', [])
+            imp_cont = preprocessing.get('imp_cont') or preprocessing.get('imputer')
+            scaler = preprocessing.get('scaler')
+            imp_bin = preprocessing.get('imp_bin')
+            le_dict = preprocessing.get('le_dict') or preprocessing.get('cat_encoders', {})
+
             df = pd.DataFrame([patient_data])
             
             # ========== FEATURE ENGINEERING (to match training) ==========
@@ -478,11 +550,10 @@ class VirusPredictor:
             skin_cols = ['PAPULAR RASH', 'PUSTULAR RASH', 'MACULOPAPULAR RASH', 'BULLAE']
             systemic_cols = ['MYALGIA', 'ARTHRALGIA', 'CHILLS', 'RIGORS', 'MALAISE']
             
-            # Fill missing symptoms with 0
             for col in symptom_cols:
                 df[col] = df[col].fillna(0)
             
-            # Fill duration
+            df['durationofillness'] = df.get('durationofillness', 0)
             df['durationofillness'] = df['durationofillness'].fillna(0)
             
             # Create symptom counts
@@ -589,6 +660,19 @@ class VirusPredictor:
             df['patienttype_age'] = df.get('PATIENTTYPE', 1) * df['age_group']
             df['sex_respiratory'] = df.get('SEX', 1) * df['respiratory_symptoms']
             df['duration_symptom_ratio'] = df['durationofillness'] / (df['symptom_count'] + 1)
+
+            # Match the syndrome interaction features used during training.
+            # These fields are part of the fitted continuous schema in the bundled checkpoints.
+            syndrome_encoded = df['Syndrome_encoded'] if 'Syndrome_encoded' in df.columns else 0
+            df['syndrome_fever'] = syndrome_encoded * df.get('FEVER', 0)
+            df['syndrome_respiratory'] = syndrome_encoded * df['respiratory_symptoms']
+            df['syndrome_gi'] = syndrome_encoded * df['gi_symptoms']
+            df['syndrome_neuro'] = syndrome_encoded * df['neuro_symptoms']
+            df['syndrome_skin'] = syndrome_encoded * df['skin_symptoms']
+            df['syndrome_systemic'] = syndrome_encoded * df['systemic_symptoms']
+            df['syndrome_severity'] = syndrome_encoded * df['severity_score']
+            df['syndrome_age'] = syndrome_encoded * df['age']
+            df['syndrome_symptom_count'] = syndrome_encoded * df['symptom_count']
             
             # Final cleanup
             df = df.replace([np.inf, -np.inf], 0).fillna(0)
@@ -596,17 +680,35 @@ class VirusPredictor:
             # ========== STANDARD PREPROCESSING ==========
             
             # === CONTINUOUS FEATURES ===
-            available_cont_cols = [col for col in cont_cols if col in df.columns]
-            if available_cont_cols:
-                X_cont = imp_cont.transform(df[available_cont_cols])
-                X_cont = scaler.transform(X_cont).astype(np.float32)
-            else:
-                X_cont = np.zeros((1, len(cont_cols)), dtype=np.float32)
+            # Ensure the dataframe contains all continuous columns the imputer/scaler
+            # were fitted with. If missing, add them with default 0 values so
+            # sklearn transformers won't raise feature-name mismatch errors.
+            fitted_cont_cols = getattr(imp_cont, 'feature_names_in_', None)
+            expected_cont_cols = list(fitted_cont_cols) if fitted_cont_cols is not None else list(cont_cols)
+            for c in expected_cont_cols:
+                if c not in df.columns:
+                    df[c] = 0
+
+            try:
+                if expected_cont_cols and imp_cont is not None and scaler is not None:
+                    # Use expected_cont_cols in the original fit order
+                    X_cont = imp_cont.transform(df[expected_cont_cols])
+                    X_cont = scaler.transform(X_cont).astype(np.float32)
+                else:
+                    X_cont = np.zeros((1, len(expected_cont_cols)), dtype=np.float32)
+            except Exception as exc:
+                # Defensive fallback: if transformer still errors, emit a warning
+                # and use zeros to allow inference to continue.
+                st.warning(f"Continuous preprocessing failed; filling zeros. Error: {exc}")
+                X_cont = np.zeros((1, len(expected_cont_cols)), dtype=np.float32)
             
             # === BINARY FEATURES ===
             available_bin_cols = [col for col in binary_cols if col in df.columns]
             if available_bin_cols:
-                X_bin = imp_bin.transform(df[available_bin_cols]).astype(np.float32)
+                if imp_bin is not None:
+                    X_bin = imp_bin.transform(df[available_bin_cols]).astype(np.float32)
+                else:
+                    X_bin = df[available_bin_cols].fillna(0).values.astype(np.float32)
             else:
                 X_bin = np.zeros((1, len(binary_cols)), dtype=np.float32)
             
@@ -614,13 +716,32 @@ class VirusPredictor:
             X_cat_list = []
             for col in cat_cols:
                 if col in df.columns:
-                    le = le_dict[col]
+                    le = le_dict.get(col)
                     val = str(df[col].values[0])
-                    mapping = dict(zip(le.classes_, range(len(le.classes_))))
-                    encoded_val = mapping.get(val, 0)
+                    if isinstance(le, LabelEncoder) or hasattr(le, 'classes_'):
+                        mapping = {cls: idx for idx, cls in enumerate(le.classes_)}
+                        encoded_val = mapping.get(val, 0)
+                    else:
+                        # Fallback: if this looks like a syndrome column, try CSV mapping or integer conversion
+                        encoded_val = 0
+                        try:
+                            # direct integer present
+                            raw_val = df[col].values[0]
+                            if pd.notnull(raw_val):
+                                try:
+                                    encoded_val = int(raw_val)
+                                except Exception:
+                                    # try match label to SYNDROME_MAPPING
+                                    lookup = str(raw_val).strip().lower()
+                                    for k, v in SYNDROME_MAPPING.items():
+                                        if str(v).strip().lower() == lookup:
+                                            encoded_val = int(k)
+                                            break
+                        except Exception:
+                            encoded_val = 0
                     X_cat_list.append(encoded_val)
                 else:
-                    X_cat_list.append(0)  # Default value for missing categorical
+                    X_cat_list.append(0)
             
             X_cat = np.array([X_cat_list], dtype=np.int64) if cat_cols else np.zeros((1, 0), dtype=np.int64)
             
@@ -662,7 +783,7 @@ class VirusPredictor:
             y_pred = np.argmax(y_pred_proba)
             top_5_indices = np.argsort(y_pred_proba)[-5:][::-1]
             
-            # Check if "Other_Viruses" (class 15) is in top 5
+            # Check if "Other Viruses" (class 15) is in top 5
             second_model_results = None
             if 15 in top_5_indices:
                 xb2, xc2, xcat2 = self.preprocess_features(patient_data, self.preprocessing2)

@@ -1,14 +1,9 @@
 Original,Encoded
-HIV,0
-Haemophilus influenzae,1
-Herpes simplex virus (HSV),2
-Human papillomavirus (HPV),3
-Kyasanur Forest Disease,4
-Metapneumovirus,5
-Norovirus,6
-Other Influenza,7
-Rhinovirus,8
-Toxoplasma,9
-Unknown,10
-West Nile virus (WNV),11
-Zika,12
+Human papillomavirus (HPV),0
+Kyasanur Forest Disease,1
+Metapneumovirus,2
+Norovirus,3
+Other Influenza,4
+Rhinovirus,5
+West Nile virus (WNV),6
+Zika,7

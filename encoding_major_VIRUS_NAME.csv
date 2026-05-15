@@ -6,7 +6,7 @@ Hepatitis A Virus,3
 Hepatitis B Virus,4
 Hepatitis C Virus,5
 Hepatitis E Virus,6
-Herpes simplex virus 1/2,7
+Herpes Simplex Virus (HSV),7
 Influenza A H1N1,8
 Influenza A H3N2,9
 Influenza B Victoria,10
@@ -18,10 +18,8 @@ Other_Viruses,15
 Parvovirus,16
 Respiratory Adenovirus,17
 Respiratory Syncytial Virus (RSV),18
-Respiratory Syncytial Virus-A (RSV-A),19
-Respiratory Syncytial Virus-B (RSV-B),20
-Rotavirus,21
-Rubella,22
-SARS-Cov-2,23
-Scrub typhus (Orientia tsutsugamushi),24
-Varicella zoster virus (VZV),25
+Rotavirus,19
+Rubella,20
+SARS-Cov-2,21
+Scrub typhus (Orientia tsutsugamushi),22
+Varicella zoster virus (VZV),23
