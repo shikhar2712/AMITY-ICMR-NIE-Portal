@@ -8,9 +8,11 @@ Acute Diarrheal Disease,1,Dysentery
 Acute Encephalitis Syndrome (AES),2,Acute Encephalitis Syndrome (AES)
 Acute Encephalitis Syndrome (AES),2,Fever with Altered Sensorium
 Conjunctivitis,3,Conjunctivitis
+Fever with Rash,4,Fever with Rash
 Fever with Rash,4,Rash
 Hemorrhagic fever,5,Hemorrhagic fever
 Hemorrhagic fever,5,Fever with Bleeding
+Jaundice of < 4 weeks,6,Jaundice of < 4 weeks
 Jaundice of < 4 weeks,6,Acute Hepatitis
 Only Fever < 7 days,7,Only Fever < 7 days
 Only Fever < 7 days,7,Only Fever >= 7 days
