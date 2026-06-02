@@ -127,13 +127,27 @@ class DataHandler:
             # Transform patient data to human-readable format
             readable_patient_info = {
                 'patient_id': patient_id,
-                # 'patient_name': patient_data.get('patient_name', ''),
+                # Keep core patient administrative fields first (matching app input order)
+                'date_of_collection': patient_data.get('date_of_collection', ''),
+                'patient_study_id': patient_data.get('patient_study_id', ''),
+                'patient_mrd_id': patient_data.get('patient_mrd_id', ''),
+                'hospital': patient_data.get('hospital', ''),
+                'department': patient_data.get('department', ''),
+                'date_of_admission': patient_data.get('date_of_admission', ''),
+                'patient_name': patient_data.get('patient_name', ''),
+                'address_line': patient_data.get('address_line', ''),
+                'mobile_no': patient_data.get('mobile_no', ''),
+
+                # Remaining demographics and model-relevant fields
                 'age': patient_data.get('age'),
                 'sex': 'Male' if patient_data.get('SEX') == 1 else 'Female',
                 'patient_type': 'Inpatient' if patient_data.get('PATIENTTYPE') == 1 else 'Outpatient',
+                'onset_of_illness': patient_data.get('onset_of_illness', ''),
                 'duration_of_illness_days': patient_data.get('durationofillness'),
                 'state_name': state_name or 'Unknown',
                 'district_name': district_name or 'Unknown',
+                'subdistrict': patient_data.get('subdistrict', ''),
+                'pin_code': patient_data.get('pin_code', ''),
                 'syndrome_name': patient_data.get('syndrome_name', ''),
                 'syndrome_specification': patient_data.get('other_syndrome_specification', ''),
                 'month_name': self._get_month_name(patient_data.get('month', 1)),
@@ -556,7 +570,7 @@ class DataHandler:
             column_order = [
                 'patient_id', 'age', 'sex', 'patient_type',
                 'state_name', 'district_name', 'syndrome_name', 'syndrome_specification',
-                'duration_of_illness_days', 'month_name', 'year', 'prediction_timestamp'
+                'onset_of_illness', 'duration_of_illness_days', 'month_name', 'year', 'prediction_timestamp'
             ]
             
             # Add symptom columns

@@ -184,34 +184,62 @@ def main():
 
         patient_data = {}
 
-        # Demographics (MATCH EXACT TRAINING COLUMN NAMES)
+        # Top section order as requested in the specification image
+        # 1) Date of collection, 2) Patient study ID, 3) Patient MRD ID,
+        # 4) Hospital, 5) Department, 6) Date of admission, 7) Name,
+        # 8) Address (expandable), 9) Mobile no.
+        # Dates formatted as DD-MM-YYYY to match the requested format
+        patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now()).strftime('%d-%m-%Y')
+        patient_data['patient_study_id'] = st.sidebar.text_input("Patient Study ID (e.g., MMC 01)", value="")
+        patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="")
+        # Only two study-site options as requested
+        patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0)
+        patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0)
+        patient_data['date_of_admission'] = st.sidebar.date_input("Date of Admission", value=datetime.now()).strftime('%d-%m-%Y')
+        patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="")
+
+        # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
+        with st.sidebar.expander("Address & Location (expand)", expanded=False):
+            patient_data['address_line'] = st.text_input("Address (Street / City)", value="", key='address_line')
+
+            # State selection with names
+            state_names = state_map['state_name'].tolist()
+            # Set Tamil Nadu as default if available, otherwise use first state
+            default_state_index = 0
+            if 'Tamil Nadu' in state_names:
+                default_state_index = state_names.index('Tamil Nadu')
+            selected_state_name = st.selectbox("State", options=state_names, index=default_state_index, key='state_select')
+            patient_data['labstate'] = int(state_map[state_map['state_name'] == selected_state_name]['encoded_value'].values[0])
+
+            # District selection filtered by state
+            filtered_districts = district_state_map[district_state_map['state'] == selected_state_name]
+            district_names = filtered_districts['district_name'].tolist()
+
+            if len(district_names) > 0:
+                selected_district_name = st.selectbox("District", options=district_names, index=0, key='district_select')
+                patient_data['districtencoded'] = int(filtered_districts[filtered_districts['district_name'] == selected_district_name]['district_encoded'].values[0])
+            else:
+                st.warning("No districts available for selected state")
+                patient_data['districtencoded'] = 0
+                selected_district_name = ''
+
+            # Address details
+            patient_data['subdistrict'] = st.text_input("Subdistrict", value="", key='subdistrict')
+            patient_data['pin_code'] = st.text_input("Pin Code", value="", key='pin_code')
+
+        patient_data['mobile_no'] = st.sidebar.text_input("Mobile No (10 digit)", value="")
+
+        st.sidebar.markdown("---")
+
+        # Remaining fields shown below the top requested order
         patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1)
         patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1], 
                                                     format_func=lambda x: "Female" if x == 0 else "Male", index=1)
         patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[0, 1], 
                                                             format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1)
+        patient_data['onset_of_illness'] = st.sidebar.date_input("Onset of Illness", value=datetime.now()).strftime('%d-%m-%Y')
         patient_data['durationofillness'] = st.sidebar.number_input("Duration of Illness (days)", 
                                                                      min_value=0, max_value=365, value=3)
-
-        # State selection with names
-        state_names = state_map['state_name'].tolist()
-        # Set Tamil Nadu as default if available, otherwise use first state
-        default_state_index = 0
-        if 'Tamil Nadu' in state_names:
-            default_state_index = state_names.index('Tamil Nadu')
-        selected_state_name = st.sidebar.selectbox("State", options=state_names, index=default_state_index)
-        patient_data['labstate'] = int(state_map[state_map['state_name'] == selected_state_name]['encoded_value'].values[0])
-
-        # District selection filtered by state
-        filtered_districts = district_state_map[district_state_map['state'] == selected_state_name]
-        district_names = filtered_districts['district_name'].tolist()
-
-        if len(district_names) > 0:
-            selected_district_name = st.sidebar.selectbox("District", options=district_names, index=0)
-            patient_data['districtencoded'] = int(filtered_districts[filtered_districts['district_name'] == selected_district_name]['district_encoded'].values[0])
-        else:
-            st.sidebar.warning("No districts available for selected state")
-            patient_data['districtencoded'] = 0
 
         # Temporal features
         current_month = datetime.now().month
@@ -341,14 +369,35 @@ def main():
                                     ]
                                 }
                             
-                            # Save to database (non-blocking)
-                            saved_id = save_prediction_to_db(
-                                patient_data=patient_data,
-                                prediction_result=prediction_result,
-                                model_info={'model1': 'CustomMajor', 'model2': 'CustomOther'},
-                                state_name=selected_state_name,
-                                district_name=selected_district_name
-                            )
+                            # Basic validation for mobile number and pin code (optional fields)
+                            mobile_raw = str(patient_data.get('mobile_no', '')).strip()
+                            pin_raw = str(patient_data.get('pin_code', '')).strip()
+                            invalid_fields = []
+
+                            # Validate mobile: if provided, must be 10 digits
+                            if mobile_raw:
+                                mobile_digits = ''.join(ch for ch in mobile_raw if ch.isdigit())
+                                if len(mobile_digits) != 10:
+                                    invalid_fields.append('Mobile No (must be 10 digits)')
+
+                            # Validate pin code: if provided, must be 6 digits
+                            if pin_raw:
+                                if not pin_raw.isdigit() or len(pin_raw) != 6:
+                                    invalid_fields.append('Pin Code (must be 6 digits)')
+
+                            if invalid_fields:
+                                # Warn user and skip database save to avoid storing bad contact data
+                                st.sidebar.warning(f"Data not saved: invalid fields - {', '.join(invalid_fields)}. Prediction displayed but not stored.")
+                                saved_id = None
+                            else:
+                                # Save to database (non-blocking)
+                                saved_id = save_prediction_to_db(
+                                    patient_data=patient_data,
+                                    prediction_result=prediction_result,
+                                    model_info={'model1': 'CustomMajor', 'model2': 'CustomOther'},
+                                    state_name=selected_state_name,
+                                    district_name=selected_district_name
+                                )
                             
                             # Store saved_id in session state for validation
                             st.session_state['saved_id'] = saved_id
