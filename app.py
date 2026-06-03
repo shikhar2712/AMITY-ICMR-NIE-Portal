@@ -6,7 +6,7 @@ from datetime import datetime
 # Model and prediction imports
 from model_handler import (
     VirusPredictor, get_virus_predictor, refresh_virus_mappings,
-    VIRUS_MAPPING, OTHER_VIRUS_MAPPING, COMBINED_VIRUS_MAPPING, ALL_SYMPTOMS,
+    VIRUS_MAPPING, OTHER_VIRUS_MAPPING, ALL_SYMPTOMS,
     SYNDROME_MAPPING, SYNDROME_DISPLAY_MAPPING
 )
 
@@ -52,7 +52,11 @@ SYMPTOM_DISPLAY_NAMES = {
 }
 
 # Database imports (minimal addition)
-from data_handler import save_prediction_to_db, get_db_health, get_prediction_stats, save_validation_to_db
+from data_handler import (
+    save_prediction_to_db,
+    get_db_health,
+    get_prediction_stats,
+)
 
 
 # Page configuration - with error handling for deployment consistency
@@ -324,7 +328,35 @@ def main():
                         top_5_indices = prediction_results['top_5_indices']
                         second_model_results = prediction_results['second_model_results']
 
-                        # Save prediction results to session state for validation form
+                        # Save prediction results to session state.
+                        # Database insert is intentionally deferred until user clicks "Save the Report".
+                        prediction_result = {
+                            'predicted_virus': VIRUS_MAPPING[y_pred],
+                            'predicted_virus_id': int(y_pred),
+                            'confidence': float(y_pred_proba[y_pred] * 100),
+                            'top_5_predictions': [
+                                {
+                                    'virus': VIRUS_MAPPING[idx],
+                                    'virus_id': int(idx),
+                                    'confidence': float(y_pred_proba[idx] * 100)
+                                } for idx in top_5_indices
+                            ]
+                        }
+
+                        if second_model_results:
+                            prediction_result['sub_classification'] = {
+                                'predicted_sub_virus': OTHER_VIRUS_MAPPING[second_model_results['prediction']],
+                                'predicted_sub_virus_id': int(second_model_results['prediction']),
+                                'sub_confidence': float(second_model_results['probabilities'][second_model_results['prediction']] * 100),
+                                'top_5_sub_predictions': [
+                                    {
+                                        'virus': OTHER_VIRUS_MAPPING[idx],
+                                        'virus_id': int(idx),
+                                        'confidence': float(second_model_results['probabilities'][idx] * 100)
+                                    } for idx in second_model_results['top_5']
+                                ]
+                            }
+
                         st.session_state['prediction_results'] = {
                             'y_pred': y_pred,
                             'y_pred_proba': y_pred_proba,
@@ -332,80 +364,16 @@ def main():
                             'second_model_results': second_model_results,
                             'patient_data': patient_data.copy(),
                             'selected_state_name': selected_state_name,
-                            'selected_district_name': selected_district_name
+                            'selected_district_name': selected_district_name,
+                            'prediction_result_for_db': prediction_result,
+                            'model_info': {'model1': 'CustomMajor', 'model2': 'CustomOther'}
                         }
+                        # New prediction resets previous saved report marker
+                        if 'saved_id' in st.session_state:
+                            del st.session_state['saved_id']
 
                         # Display results
                         st.success("Prediction Complete!")
-                        
-                        # Save prediction to database (minimal intrusion)
-                        try:
-                            # Prepare prediction result for database
-                            prediction_result = {
-                                'predicted_virus': VIRUS_MAPPING[y_pred],
-                                'predicted_virus_id': int(y_pred),
-                                'confidence': float(y_pred_proba[y_pred] * 100),
-                                'top_5_predictions': [
-                                    {
-                                        'virus': VIRUS_MAPPING[idx],
-                                        'virus_id': int(idx),
-                                        'confidence': float(y_pred_proba[idx] * 100)
-                                    } for idx in top_5_indices
-                                ]
-                            }
-                            
-                            # Add second model results if available
-                            if second_model_results:
-                                prediction_result['sub_classification'] = {
-                                    'predicted_sub_virus': OTHER_VIRUS_MAPPING[second_model_results['prediction']],
-                                    'predicted_sub_virus_id': int(second_model_results['prediction']),
-                                    'sub_confidence': float(second_model_results['probabilities'][second_model_results['prediction']] * 100),
-                                    'top_5_sub_predictions': [
-                                        {
-                                            'virus': OTHER_VIRUS_MAPPING[idx],
-                                            'virus_id': int(idx),
-                                            'confidence': float(second_model_results['probabilities'][idx] * 100)
-                                        } for idx in second_model_results['top_5']
-                                    ]
-                                }
-                            
-                            # Basic validation for mobile number and pin code (optional fields)
-                            mobile_raw = str(patient_data.get('mobile_no', '')).strip()
-                            pin_raw = str(patient_data.get('pin_code', '')).strip()
-                            invalid_fields = []
-
-                            # Validate mobile: if provided, must be 10 digits
-                            if mobile_raw:
-                                mobile_digits = ''.join(ch for ch in mobile_raw if ch.isdigit())
-                                if len(mobile_digits) != 10:
-                                    invalid_fields.append('Mobile No (must be 10 digits)')
-
-                            # Validate pin code: if provided, must be 6 digits
-                            if pin_raw:
-                                if not pin_raw.isdigit() or len(pin_raw) != 6:
-                                    invalid_fields.append('Pin Code (must be 6 digits)')
-
-                            if invalid_fields:
-                                # Warn user and skip database save to avoid storing bad contact data
-                                st.sidebar.warning(f"Data not saved: invalid fields - {', '.join(invalid_fields)}. Prediction displayed but not stored.")
-                                saved_id = None
-                            else:
-                                # Save to database (non-blocking)
-                                saved_id = save_prediction_to_db(
-                                    patient_data=patient_data,
-                                    prediction_result=prediction_result,
-                                    model_info={'model1': 'CustomMajor', 'model2': 'CustomOther'},
-                                    state_name=selected_state_name,
-                                    district_name=selected_district_name
-                                )
-                            
-                            # Store saved_id in session state for validation
-                            st.session_state['saved_id'] = saved_id
-                                
-                        except Exception as db_error:
-                            # Don't let database errors break the prediction display
-                            st.sidebar.warning("⚠️ Database save failed")
-                            st.sidebar.caption(f"Error: {str(db_error)[:50]}...")
 
                         col1, col2 = st.columns([1, 1])
 
@@ -514,90 +482,104 @@ def main():
                         import traceback
                         st.error(traceback.format_exc())
 
-        # Validation Section - Show if prediction results exist in session state
-        if 'prediction_results' in st.session_state and 'saved_id' in st.session_state and st.session_state['saved_id']:
+        # Doctor recommendation and laboratory section - shown after prediction
+        if 'prediction_results' in st.session_state:
             st.markdown("---")
-            st.subheader("🩺 Medical Validation (Optional)")
-            st.info("Help us improve the AI model by providing the actual diagnosis. This data will be used for model validation and improvement.")
-            
-            # Get prediction results from session state
+            st.subheader("🧑‍⚕️ Doctor Recommendation & Laboratory Variables")
+            st.info("Fill these fields after prediction, then click 'Save the Report' to store the full report in database.")
+
             pred_results = st.session_state['prediction_results']
-            saved_id = st.session_state['saved_id']
-            
-            # Create validation form
-            with st.form(key=f"validation_form_{saved_id}"):
-                col_val1, col_val2 = st.columns([2, 1])
-                
-                with col_val1:
-                    # Combined dropdown with all virus options
-                    virus_options = list(COMBINED_VIRUS_MAPPING.keys())
-                    
-                    selected_virus_key = st.selectbox(
-                        "Actual Virus Diagnosis",
-                        options=[None] + virus_options,
-                        format_func=lambda x: "Please select the actual diagnosis..." if x is None else COMBINED_VIRUS_MAPPING[x],
-                        help="Select the confirmed virus diagnosis from laboratory results or clinical assessment"
-                    )
-                
-                with col_val2:
-                    validation_confidence = st.selectbox(
-                        "Confidence Level",
-                        options=["High", "Medium", "Low"],
-                        help="How confident are you in this diagnosis?"
-                    )
-                
-                # Notes field
-                validation_notes = st.text_area(
-                    "Additional Notes (Optional)",
-                    help="Any additional clinical observations or context",
-                    placeholder="e.g., confirmed by RT-PCR, clinical presentation consistent with..."
+            saved_id = st.session_state.get('saved_id')
+            form_key_suffix = saved_id if saved_id else 'pending'
+
+            # Build combined virus options from both major and other virus mappings
+            major_viruses = list(VIRUS_MAPPING.values())
+            other_viruses = list(OTHER_VIRUS_MAPPING.values())
+            all_virus_options = sorted(list(set(major_viruses + other_viruses)))
+
+            with st.form(key=f"doctor_lab_form_{form_key_suffix}"):
+                doctor_recommended = st.multiselect(
+                    "Doctor Recommended - Suspected Pathogens (up to 5)",
+                    options=all_virus_options,
+                    help="Select up to 5 viruses from major and other virus lists"
                 )
-                
-                # Submit validation button
-                validation_submitted = st.form_submit_button(
-                    "Submit Validation",
+
+                lab_col1, lab_col2 = st.columns(2)
+
+                with lab_col1:
+                    lab_id = st.text_input("Lab ID", placeholder="A123456")
+                    test_performed = st.text_input("Test Performed")
+                    date_of_sample_collection = st.date_input("Date of Sample Collection", value=datetime.now()).strftime('%d-%m-%Y')
+                    sample_type = st.text_input("Sample Type")
+
+                with lab_col2:
+                    diagnostic_method = st.text_input("Diagnostic Method")
+                    laboratory_results = st.selectbox("Laboratory Results", options=["Positive", "Negative"])
+                    confirmed_pathogen = st.text_input("Confirmed Pathogen")
+                    date_of_report = st.date_input("Date of Report", value=datetime.now(), key=f"date_of_report_{saved_id}").strftime('%d-%m-%Y')
+
+                report_already_saved = bool(saved_id)
+                doctor_lab_submitted = st.form_submit_button(
+                    "Save the Report",
                     type="secondary",
-                    use_container_width=True
+                    use_container_width=True,
+                    disabled=report_already_saved
                 )
-                
-                if validation_submitted and selected_virus_key is not None:
-                    # Save validation to database using session state data
-                    validation_data = {
-                        'prediction_id': saved_id,
-                        'actual_virus_key': selected_virus_key,
-                        'actual_virus_name': COMBINED_VIRUS_MAPPING[selected_virus_key],
-                        'confidence_level': validation_confidence,
-                        'notes': validation_notes,
-                        'predicted_virus': VIRUS_MAPPING[pred_results['y_pred']],
-                        'prediction_confidence': float(pred_results['y_pred_proba'][pred_results['y_pred']] * 100),
-                        'patient_summary': {
-                            'age': pred_results['patient_data']['age'],
-                            'sex': 'Male' if pred_results['patient_data']['SEX'] == 1 else 'Female',
-                            'state': pred_results['selected_state_name'],
-                            'district': pred_results['selected_district_name']
-                        }
-                    }
-                    
-                    try:
-                        validation_id = save_validation_to_db(validation_data)
-                        if validation_id:
-                            st.success("✅ Thank you! Validation submitted successfully.")
-                            st.balloons()
-                            st.caption(f"Validation ID: {validation_id[:8]}...")
-                            # Clear the session state after successful validation
-                            if 'prediction_results' in st.session_state:
-                                del st.session_state['prediction_results']
-                            if 'saved_id' in st.session_state:
-                                del st.session_state['saved_id']
+
+                if report_already_saved:
+                    st.caption(f"Report already saved. Document ID: {saved_id[:8]}...")
+
+                if doctor_lab_submitted:
+                    if len(doctor_recommended) > 5:
+                        st.warning("⚠️ Please select at most 5 suspected pathogens.")
+                    else:
+                        # Validate mobile and pin at save time (optional fields)
+                        patient_data_for_save = pred_results['patient_data']
+                        mobile_raw = str(patient_data_for_save.get('mobile_no', '')).strip()
+                        pin_raw = str(patient_data_for_save.get('pin_code', '')).strip()
+                        invalid_fields = []
+
+                        if mobile_raw:
+                            mobile_digits = ''.join(ch for ch in mobile_raw if ch.isdigit())
+                            if len(mobile_digits) != 10:
+                                invalid_fields.append('Mobile No (must be 10 digits)')
+
+                        if pin_raw:
+                            if not pin_raw.isdigit() or len(pin_raw) != 6:
+                                invalid_fields.append('Pin Code (must be 6 digits)')
+
+                        if invalid_fields:
+                            st.warning(f"⚠️ Report not saved: {', '.join(invalid_fields)}")
                         else:
-                            st.error("❌ Failed to save validation. Please try again.")
-                    except Exception as val_error:
-                        st.error(f"❌ Validation error: {str(val_error)}")
-                        # Add more detailed error info
-                        st.error(f"Full error: {val_error}")
-                
-                elif validation_submitted and selected_virus_key is None:
-                    st.warning("⚠️ Please select an actual diagnosis before submitting.")
+                            doctor_lab_data = {
+                            'doctor_recommended_viruses': doctor_recommended,
+                            'lab_id': lab_id,
+                            'test_performed': test_performed,
+                            'date_of_sample_collection': date_of_sample_collection,
+                            'sample_type': sample_type,
+                            'diagnostic_method': diagnostic_method,
+                            'laboratory_results': laboratory_results,
+                            'confirmed_pathogen': confirmed_pathogen,
+                            'date_of_report': date_of_report,
+                            }
+
+                            try:
+                                report_id = save_prediction_to_db(
+                                    patient_data=patient_data_for_save,
+                                    prediction_result=pred_results['prediction_result_for_db'],
+                                    model_info=pred_results.get('model_info', {'model1': 'CustomMajor', 'model2': 'CustomOther'}),
+                                    state_name=pred_results.get('selected_state_name'),
+                                    district_name=pred_results.get('selected_district_name'),
+                                    doctor_lab_data=doctor_lab_data
+                                )
+                                if report_id:
+                                    st.session_state['saved_id'] = report_id
+                                    st.success("✅ Full report saved successfully.")
+                                    st.caption(f"Report ID: {report_id[:8]}...")
+                                else:
+                                    st.error("❌ Failed to save report. Please try again.")
+                            except Exception as report_save_error:
+                                st.error(f"❌ Report save error: {str(report_save_error)}")
 
 
 if __name__ == "__main__":

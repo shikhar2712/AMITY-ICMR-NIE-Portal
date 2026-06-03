@@ -69,9 +69,7 @@ class DataHandler:
                 'predictions': [
                     ('timestamp', -1),
                     ('patient_id', 1),
-                    ('predicted_virus', 1),
-                    ('validation.validated', 1),
-                    ('validation.actual_virus_name', 1)
+                    ('predicted_virus', 1)
                 ],
                 'patients': [
                     ('patient_id', 1),
@@ -98,6 +96,7 @@ class DataHandler:
                        patient_data: Dict, 
                        prediction_result: Dict,
                        model_info: Dict = None,
+                       doctor_lab_data: Dict = None,
                        state_name: str = None,
                        district_name: str = None) -> Optional[str]:
         """
@@ -173,6 +172,9 @@ class DataHandler:
                 'top_5_confidence': prediction_result.get('top_5_predictions', [{}])[4].get('confidence', 0) if len(prediction_result.get('top_5_predictions', [])) > 4 else 0
             }
             
+            # Doctor recommendation/laboratory data can be provided now (Save the Report flow)
+            doctor_lab_data = doctor_lab_data or {}
+
             # Prepare complete document for single collection
             document = {
                 # Patient information (flat structure)
@@ -184,14 +186,18 @@ class DataHandler:
                 # Predictions (flat structure)
                 **prediction_readable,
                 
-                # Validation fields (empty initially, filled when validated)
-                'validation_status': 'pending',
-                'actual_virus_name': '',
-                'actual_virus_category': '',
-                'validation_confidence_level': '',
-                'validation_notes': '',
-                'validated_at': None,
-                'validated_by': '',
+                # Doctor recommendation and laboratory fields
+                'doctor_recommended_viruses': doctor_lab_data.get('doctor_recommended_viruses', []),
+                'doctor_recommended_count': len(doctor_lab_data.get('doctor_recommended_viruses', [])),
+                'lab_id': doctor_lab_data.get('lab_id', ''),
+                'test_performed': doctor_lab_data.get('test_performed', ''),
+                'date_of_sample_collection': doctor_lab_data.get('date_of_sample_collection', ''),
+                'sample_type': doctor_lab_data.get('sample_type', ''),
+                'diagnostic_method': doctor_lab_data.get('diagnostic_method', ''),
+                'laboratory_results': doctor_lab_data.get('laboratory_results', ''),
+                'confirmed_pathogen': doctor_lab_data.get('confirmed_pathogen', ''),
+                'date_of_report': doctor_lab_data.get('date_of_report', ''),
+                'doctor_lab_submitted_at': datetime.utcnow() if doctor_lab_data else None,
                 
                 # Metadata
                 'prediction_timestamp': datetime.utcnow(),
@@ -399,129 +405,73 @@ class DataHandler:
         except Exception as e:
             logger.error(f"Error updating usage stats: {e}")
     
-    def save_validation(self, validation_data: Dict) -> Optional[str]:
+    def save_doctor_lab_data(self, doctor_lab_data: Dict) -> Optional[str]:
         """
-        Save medical validation data within the same collection document
-        
+        Save doctor recommendation and laboratory variables in the prediction document
+
         Args:
-            validation_data: Validation information including actual diagnosis
-            
+            doctor_lab_data: Dictionary containing prediction_id and doctor/lab fields
+
         Returns:
-            Document ID if successful, None otherwise
+            Prediction ID if successful, None otherwise
         """
         try:
             if self.db is None:
                 logger.error("Database not initialized")
                 return None
-            
-            # Use the single collection
+
             collection = self.db['virus_predictions']
-            prediction_id = validation_data.get('prediction_id')
-            
+            prediction_id = doctor_lab_data.get('prediction_id')
+
             if not prediction_id:
-                logger.error("No prediction_id provided in validation data")
+                logger.error("No prediction_id provided in doctor/lab data")
                 return None
-            
-            # Convert string ID to ObjectId for MongoDB
+
             from bson import ObjectId
             try:
                 object_id = ObjectId(prediction_id)
             except Exception as e:
-                logger.error(f"Invalid prediction_id format: {e}")
+                logger.error(f"Invalid prediction_id format for doctor/lab data: {e}")
                 return None
-            
-            # Prepare validation fields for flat structure
-            validation_fields = {
-                'validation_status': 'validated',
-                'actual_virus_name': validation_data.get('actual_virus_name', ''),
-                'actual_virus_category': 'Main' if validation_data.get('actual_virus_key', '').startswith('main_') else 'Other',
-                'validation_confidence_level': validation_data.get('confidence_level', ''),
-                'validation_notes': validation_data.get('notes', ''),
-                'validated_at': datetime.utcnow(),
-                'validated_by': 'Medical Professional',
-                'validation_accuracy': 'Correct' if validation_data.get('actual_virus_name') == validation_data.get('predicted_virus') else 'Incorrect'
+
+            recommended_viruses = doctor_lab_data.get('doctor_recommended_viruses', [])
+            update_fields = {
+                'doctor_recommended_viruses': recommended_viruses,
+                'doctor_recommended_count': len(recommended_viruses),
+                'lab_id': doctor_lab_data.get('lab_id', ''),
+                'test_performed': doctor_lab_data.get('test_performed', ''),
+                'date_of_sample_collection': doctor_lab_data.get('date_of_sample_collection', ''),
+                'sample_type': doctor_lab_data.get('sample_type', ''),
+                'diagnostic_method': doctor_lab_data.get('diagnostic_method', ''),
+                'laboratory_results': doctor_lab_data.get('laboratory_results', ''),
+                'confirmed_pathogen': doctor_lab_data.get('confirmed_pathogen', ''),
+                'date_of_report': doctor_lab_data.get('date_of_report', ''),
+                'doctor_lab_submitted_at': datetime.utcnow()
             }
-            
-            # Update the document with validation data
+
             result = collection.update_one(
                 {'_id': object_id},
                 {
-                    '$set': validation_fields,
+                    '$set': update_fields,
                     '$currentDate': {'last_updated': True}
                 }
             )
-            
+
             if result.modified_count > 0:
-                logger.info(f"Validation added to prediction ID: {prediction_id}")
+                logger.info(f"Doctor/lab data saved for prediction ID: {prediction_id}")
                 return prediction_id
-            else:
-                logger.warning(f"No prediction found with ID: {prediction_id}")
-                return None
-            
-        except Exception as e:
-            logger.error(f"Error saving validation: {e}")
+
+            # Treat matched without modification as success (same values re-submitted)
+            if result.matched_count > 0:
+                logger.info(f"Doctor/lab data unchanged for prediction ID: {prediction_id}")
+                return prediction_id
+
+            logger.warning(f"No prediction found with ID: {prediction_id}")
             return None
-    
-    def get_validation_stats(self) -> Dict:
-        """
-        Get validation statistics for data collection and analysis
-        Note: This is for research/improvement purposes, not system accuracy calculation
-        
-        Returns:
-            Dictionary containing validation collection statistics
-        """
-        try:
-            if self.db is None:
-                return {'status': 'error', 'message': 'Database not initialized'}
-            
-            collection = self.db['predictions']
-            
-            # Count total predictions with validation data
-            total_validations = collection.count_documents({'validation.validated': True})
-            
-            # Get validation distribution by actual virus
-            pipeline = [
-                {
-                    '$match': {'validation.validated': True}
-                },
-                {
-                    '$group': {
-                        '_id': '$validation.actual_virus_name',
-                        'count': {'$sum': 1}
-                    }
-                },
-                {'$sort': {'count': -1}}
-            ]
-            
-            validation_distribution = list(collection.aggregate(pipeline))
-            
-            # Get validation confidence distribution
-            confidence_pipeline = [
-                {
-                    '$match': {'validation.validated': True}
-                },
-                {
-                    '$group': {
-                        '_id': '$validation.confidence_level',
-                        'count': {'$sum': 1}
-                    }
-                }
-            ]
-            
-            confidence_stats = list(collection.aggregate(confidence_pipeline))
-            
-            return {
-                'status': 'success',
-                'total_validations': total_validations,
-                'validation_distribution': validation_distribution,
-                'confidence_distribution': confidence_stats,
-                'last_updated': datetime.utcnow().isoformat(),
-                'note': 'This data is for research and model improvement purposes'
-            }
-            
+
         except Exception as e:
-            logger.error(f"Error getting validation stats: {e}")
-            return {'status': 'error', 'message': str(e)}
+            logger.error(f"Error saving doctor/lab data: {e}")
+            return None
     
     def export_to_csv(self, limit: int = None) -> Optional[pd.DataFrame]:
         """
@@ -561,10 +511,6 @@ class DataHandler:
             # Format timestamps for better readability
             if 'prediction_timestamp' in df.columns:
                 df['prediction_timestamp'] = df['prediction_timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            if 'validated_at' in df.columns:
-                df['validated_at'] = df['validated_at'].apply(
-                    lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notnull(x) else ''
-                )
             
             # Reorder columns for better CSV structure
             column_order = [
@@ -586,13 +532,14 @@ class DataHandler:
             ]
             column_order.extend(prediction_cols)
             
-            # Add validation columns
-            validation_cols = [
-                'validation_status', 'actual_virus_name', 'actual_virus_category',
-                'validation_confidence_level', 'validation_notes', 'validated_at',
-                'validated_by', 'validation_accuracy'
+            # Add doctor recommendation and laboratory columns
+            doctor_lab_cols = [
+                'doctor_recommended_viruses', 'doctor_recommended_count',
+                'lab_id', 'test_performed', 'date_of_sample_collection',
+                'sample_type', 'diagnostic_method', 'laboratory_results',
+                'confirmed_pathogen', 'date_of_report', 'doctor_lab_submitted_at'
             ]
-            column_order.extend(validation_cols)
+            column_order.extend(doctor_lab_cols)
             
             # Add metadata columns
             metadata_cols = ['model_primary', 'model_secondary', 'app_version']
@@ -672,14 +619,22 @@ data_handler = DataHandler()
 def save_prediction_to_db(patient_data: Dict, 
                          prediction_result: Dict, 
                          model_info: Dict = None,
+                         doctor_lab_data: Dict = None,
                          state_name: str = None,
                          district_name: str = None) -> Optional[str]:
     """Save prediction to database"""
-    return data_handler.save_prediction(patient_data, prediction_result, model_info, state_name, district_name)
+    return data_handler.save_prediction(
+        patient_data,
+        prediction_result,
+        model_info,
+        doctor_lab_data,
+        state_name,
+        district_name
+    )
 
-def save_validation_to_db(validation_data: Dict) -> Optional[str]:
-    """Save validation to database"""
-    return data_handler.save_validation(validation_data)
+def save_doctor_lab_data_to_db(doctor_lab_data: Dict) -> Optional[str]:
+    """Save doctor recommendation and laboratory data to database"""
+    return data_handler.save_doctor_lab_data(doctor_lab_data)
 
 def get_db_health() -> Dict:
     """Get database health status"""
@@ -688,10 +643,6 @@ def get_db_health() -> Dict:
 def get_prediction_stats() -> Dict:
     """Get prediction usage statistics"""
     return data_handler.get_usage_statistics()
-
-def get_validation_stats() -> Dict:
-    """Get validation statistics"""
-    return data_handler.get_validation_stats()
 
 def export_data_to_csv(limit: int = None) -> Optional[pd.DataFrame]:
     """Export data to CSV-ready DataFrame"""
