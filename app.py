@@ -86,6 +86,25 @@ def load_mappings():
         st.error(f"Error loading mapping files: {e}")
         return None, None, None
 
+
+def reset_prediction_workflow():
+    """Clear workflow state so all inputs can be entered again from scratch."""
+    preserved_page = st.session_state.get('navigation_page', 'Prediction')
+    current_reset_version = st.session_state.get('prediction_reset_version', 0)
+    st.session_state.clear()
+    st.session_state['navigation_page'] = preserved_page
+    st.session_state['prediction_reset_version'] = current_reset_version + 1
+
+
+def request_reset_prediction_workflow():
+    """Queue a workflow reset for the next rerun."""
+    st.session_state['prediction_reset_requested'] = True
+
+
+def widget_key(name: str) -> str:
+    """Create a versioned widget key so reset actions rebuild widget state."""
+    return f"{name}_{st.session_state.get('prediction_reset_version', 0)}"
+
 def main():
     # Top logos
     col1, col2, col3 = st.columns([1, 3, 1])
@@ -107,7 +126,7 @@ def main():
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to:", ["Home", "Prediction", "About"])
+    page = st.sidebar.radio("Go to:", ["Home", "Prediction", "About"], key='navigation_page')
 
     if page == "Home":
         st.markdown(
@@ -183,6 +202,12 @@ def main():
             st.error("Failed to load mapping files. Please check the CSV files.")
             return
 
+        if st.session_state.pop('prediction_reset_requested', False):
+            reset_prediction_workflow()
+            st.rerun()
+
+        reset_version = st.session_state.get('prediction_reset_version', 0)
+
         # Sidebar for patient demographics
         st.sidebar.header("Patient Information")
 
@@ -193,18 +218,19 @@ def main():
         # 4) Hospital, 5) Department, 6) Date of admission, 7) Name,
         # 8) Address (expandable), 9) Mobile no.
         # Dates formatted as DD-MM-YYYY to match the requested format
-        patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now()).strftime('%d-%m-%Y')
-        patient_data['patient_study_id'] = st.sidebar.text_input("Patient Study ID (e.g., MMC 01)", value="")
-        patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="")
+        patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
+        patient_data['patient_study_id'] = st.sidebar.text_input("Patient Study ID (e.g., MMC 01)", value="", key=widget_key('patient_study_id'))
+        patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
         # Only two study-site options as requested
-        patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0)
-        patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0)
-        patient_data['date_of_admission'] = st.sidebar.date_input("Date of Admission", value=datetime.now()).strftime('%d-%m-%Y')
-        patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="")
+        patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0, key=widget_key('hospital'))
+        patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
+        admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
+        patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
+        patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="", key=widget_key('patient_name'))
 
         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
         with st.sidebar.expander("Address & Location (expand)", expanded=False):
-            patient_data['address_line'] = st.text_input("Address (Street / City)", value="", key='address_line')
+            patient_data['address_line'] = st.text_input("Address (Street / City)", value="", key=widget_key('address_line'))
 
             # State selection with names
             state_names = state_map['state_name'].tolist()
@@ -212,7 +238,7 @@ def main():
             default_state_index = 0
             if 'Tamil Nadu' in state_names:
                 default_state_index = state_names.index('Tamil Nadu')
-            selected_state_name = st.selectbox("State", options=state_names, index=default_state_index, key='state_select')
+            selected_state_name = st.selectbox("State", options=state_names, index=default_state_index, key=widget_key('state_select'))
             patient_data['labstate'] = int(state_map[state_map['state_name'] == selected_state_name]['encoded_value'].values[0])
 
             # District selection filtered by state
@@ -220,7 +246,7 @@ def main():
             district_names = filtered_districts['district_name'].tolist()
 
             if len(district_names) > 0:
-                selected_district_name = st.selectbox("District", options=district_names, index=0, key='district_select')
+                selected_district_name = st.selectbox("District", options=district_names, index=0, key=widget_key('district_select'))
                 patient_data['districtencoded'] = int(filtered_districts[filtered_districts['district_name'] == selected_district_name]['district_encoded'].values[0])
             else:
                 st.warning("No districts available for selected state")
@@ -228,28 +254,31 @@ def main():
                 selected_district_name = ''
 
             # Address details
-            patient_data['subdistrict'] = st.text_input("Subdistrict", value="", key='subdistrict')
-            patient_data['pin_code'] = st.text_input("Pin Code", value="", key='pin_code')
+            patient_data['subdistrict'] = st.text_input("Subdistrict", value="", key=widget_key('subdistrict'))
+            patient_data['pin_code'] = st.text_input("Pin Code", value="", key=widget_key('pin_code'))
 
-        patient_data['mobile_no'] = st.sidebar.text_input("Mobile No (10 digit)", value="")
+        patient_data['mobile_no'] = st.sidebar.text_input("Mobile No (10 digit)", value="", key=widget_key('mobile_no'))
 
         st.sidebar.markdown("---")
 
         # Remaining fields shown below the top requested order
-        patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1)
+        patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1, key=widget_key('age'))
         patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1], 
-                                                    format_func=lambda x: "Female" if x == 0 else "Male", index=1)
+                                format_func=lambda x: "Female" if x == 0 else "Male", index=1, key=widget_key('sex'))
         patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[0, 1], 
-                                                            format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1)
-        patient_data['onset_of_illness'] = st.sidebar.date_input("Onset of Illness", value=datetime.now()).strftime('%d-%m-%Y')
-        patient_data['durationofillness'] = st.sidebar.number_input("Duration of Illness (days)", 
-                                                                     min_value=0, max_value=365, value=3)
+                                    format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1, key=widget_key('patient_type'))
+        onset_date = st.sidebar.date_input("Onset of Illness", value=datetime.now(), key=widget_key('onset_of_illness'))
+        patient_data['onset_of_illness'] = onset_date.strftime('%d-%m-%Y')
+        duration_of_illness = max(0, (admission_date - onset_date).days)
+        patient_data['durationofillness'] = duration_of_illness
+        st.sidebar.caption(f"Duration of Illness (days): {duration_of_illness}")
 
         # Temporal features
         current_month = datetime.now().month
         patient_data['month'] = st.sidebar.selectbox("Month of Illness", options=list(range(1, 13)), 
                                   index=current_month - 1,  # index is 0-based
-                                  format_func=lambda x: datetime(2000, x, 1).strftime('%B'))
+                      format_func=lambda x: datetime(2000, x, 1).strftime('%B'),
+                      key=widget_key('month_of_illness'))
         # Year is fixed to 2015 for model input (hidden from UI)
         patient_data['year'] = 2015
 
@@ -263,7 +292,8 @@ def main():
             selected_syndrome_display = st.selectbox(
                 "Primary Syndrome",
                 options=syndrome_options,
-                help="Select the syndrome that best matches the clinical presentation"
+                help="Select the syndrome that best matches the clinical presentation",
+                key=widget_key('primary_syndrome')
             )
             # Map display name to encoded value
             selected_syndrome_encoded = SYNDROME_DISPLAY_MAPPING[selected_syndrome_display]
@@ -288,7 +318,8 @@ def main():
                 "Primary Syndrome",
                 options=syndrome_options,
                 format_func=lambda x: syndrome_map.get(x, str(x)),
-                help="Select the syndrome that best matches the clinical presentation"
+                help="Select the syndrome that best matches the clinical presentation",
+                key=widget_key('primary_syndrome_fallback')
             )
             patient_data['Syndrome_encoded'] = int(selected_syndrome_encoded)
             patient_data['syndrome'] = int(selected_syndrome_encoded)
@@ -305,7 +336,7 @@ def main():
         for idx, symptom in enumerate(ALL_SYMPTOMS):
             with cols[idx % 4]:
                 display_name = SYMPTOM_DISPLAY_NAMES.get(symptom, symptom.replace('_', ' ').title())
-                patient_data[symptom] = 1 if st.checkbox(display_name, key=symptom) else 0
+                patient_data[symptom] = 1 if st.checkbox(display_name, key=widget_key(symptom)) else 0
 
         st.markdown("---")
 
@@ -496,6 +527,7 @@ def main():
             major_viruses = list(VIRUS_MAPPING.values())
             other_viruses = list(OTHER_VIRUS_MAPPING.values())
             all_virus_options = sorted(list(set(major_viruses + other_viruses)))
+            lab_virus_options = [""] + all_virus_options
 
             with st.form(key=f"doctor_lab_form_{form_key_suffix}"):
                 doctor_recommended = st.multiselect(
@@ -508,14 +540,22 @@ def main():
 
                 with lab_col1:
                     lab_id = st.text_input("Lab ID", placeholder="A123456")
-                    test_performed = st.text_input("Test Performed")
+                    test_performed = st.multiselect(
+                        "Test Performed",
+                        options=lab_virus_options,
+                        key=f"test_performed_{form_key_suffix}"
+                    )
                     date_of_sample_collection = st.date_input("Date of Sample Collection", value=datetime.now()).strftime('%d-%m-%Y')
                     sample_type = st.text_input("Sample Type")
 
                 with lab_col2:
                     diagnostic_method = st.text_input("Diagnostic Method")
                     laboratory_results = st.selectbox("Laboratory Results", options=["Positive", "Negative"])
-                    confirmed_pathogen = st.text_input("Confirmed Pathogen")
+                    confirmed_pathogen = st.multiselect(
+                        "Confirmed Pathogen",
+                        options=lab_virus_options,
+                        key=f"confirmed_pathogen_{form_key_suffix}"
+                    )
                     date_of_report = st.date_input("Date of Report", value=datetime.now(), key=f"date_of_report_{saved_id}").strftime('%d-%m-%Y')
 
                 report_already_saved = bool(saved_id)
@@ -580,6 +620,14 @@ def main():
                                     st.error("❌ Failed to save report. Please try again.")
                             except Exception as report_save_error:
                                 st.error(f"❌ Report save error: {str(report_save_error)}")
+
+            reset_requested = st.button(
+                "Reset All Inputs",
+                type="secondary",
+                use_container_width=True,
+                key=f"reset_all_inputs_{form_key_suffix}",
+                on_click=request_reset_prediction_workflow
+            )
 
 
 if __name__ == "__main__":
