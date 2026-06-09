@@ -531,6 +531,14 @@ class VirusPredictor:
             le_dict = preprocessing.get('le_dict') or preprocessing.get('cat_encoders', {})
 
             df = pd.DataFrame([patient_data])
+
+            # --- Sex safety: models were trained on Female(0)/Male(1) only. ---
+            # Map any other value (e.g. "Other" = 2) to 0 for MODEL INPUT ONLY, so the
+            # network never receives an out-of-distribution value. Female/Male rows are
+            # untouched -> accuracy on real data is unchanged. patient_data (and the saved
+            # DB record) keep the original value, so "Other" is still recorded correctly.
+            if 'SEX' in df.columns:
+                df['SEX'] = df['SEX'].where(df['SEX'].isin([0, 1]), 0)
             
             # ========== FEATURE ENGINEERING (to match training) ==========
             

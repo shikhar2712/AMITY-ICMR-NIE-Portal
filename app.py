@@ -51,6 +51,10 @@ SYMPTOM_DISPLAY_NAMES = {
     'RETROORBITALPAIN': 'Retro-orbital Pain',
 }
 
+# Sex encodings for the intake form. 0/1 match the training-data encoding used by
+# the models; 2 ("Other") is a UI/record-only value (sanitised before model input).
+SEX_LABELS = {0: "Female", 1: "Male", 2: "Other"}
+
 # Database imports (minimal addition)
 from data_handler import (
     save_prediction_to_db,
@@ -224,6 +228,13 @@ def main():
         # Only two study-site options as requested
         patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0, key=widget_key('hospital'))
         patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
+        if patient_data['department'] == "Other":
+            patient_data['department_other_specification'] = st.sidebar.text_input(
+                "Specify Department", value="", key=widget_key('department_other'),
+                placeholder="Type the department name"
+            ).strip()
+        else:
+            patient_data['department_other_specification'] = ""
         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
         patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="", key=widget_key('patient_name'))
@@ -263,8 +274,8 @@ def main():
 
         # Remaining fields shown below the top requested order
         patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1, key=widget_key('age'))
-        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1], 
-                                format_func=lambda x: "Female" if x == 0 else "Male", index=1, key=widget_key('sex'))
+        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1, 2],
+                                format_func=lambda x: SEX_LABELS[x], index=1, key=widget_key('sex'))
         patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[0, 1], 
                                     format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1, key=widget_key('patient_type'))
         onset_date = st.sidebar.date_input("Onset of Illness", value=datetime.now(), key=widget_key('onset_of_illness'))
@@ -273,12 +284,9 @@ def main():
         patient_data['durationofillness'] = duration_of_illness
         st.sidebar.caption(f"Duration of Illness (days): {duration_of_illness}")
 
-        # Temporal features
-        current_month = datetime.now().month
-        patient_data['month'] = st.sidebar.selectbox("Month of Illness", options=list(range(1, 13)), 
-                                  index=current_month - 1,  # index is 0-based
-                      format_func=lambda x: datetime(2000, x, 1).strftime('%B'),
-                      key=widget_key('month_of_illness'))
+        # Temporal features — Month of Illness is derived automatically from the Onset date
+        patient_data['month'] = onset_date.month
+        st.sidebar.caption(f"Month of Illness: {onset_date.strftime('%B')} (auto-filled from Onset date)")
         # Year is fixed to 2015 for model input (hidden from UI)
         patient_data['year'] = 2015
 
@@ -494,7 +502,7 @@ def main():
                         with st.expander("Input Summary"):
                             st.write("**Patient Demographics:**")
                             st.write(f"- Age: {patient_data['age']} years")
-                            st.write(f"- Sex: {'Male' if patient_data['SEX'] == 1 else 'Female'}")
+                            st.write(f"- Sex: {SEX_LABELS.get(patient_data['SEX'], 'Unknown')}")
                             st.write(f"- Patient Type: {'Inpatient' if patient_data['PATIENTTYPE'] == 1 else 'Outpatient'}")
                             st.write(f"- Duration: {patient_data['durationofillness']} days")
 

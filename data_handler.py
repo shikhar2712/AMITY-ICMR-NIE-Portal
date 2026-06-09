@@ -132,6 +132,7 @@ class DataHandler:
                 'patient_mrd_id': patient_data.get('patient_mrd_id', ''),
                 'hospital': patient_data.get('hospital', ''),
                 'department': patient_data.get('department', ''),
+                'department_specification': patient_data.get('department_other_specification', ''),
                 'date_of_admission': patient_data.get('date_of_admission', ''),
                 'patient_name': patient_data.get('patient_name', ''),
                 'address_line': patient_data.get('address_line', ''),
@@ -139,7 +140,7 @@ class DataHandler:
 
                 # Remaining demographics and model-relevant fields
                 'age': patient_data.get('age'),
-                'sex': 'Male' if patient_data.get('SEX') == 1 else 'Female',
+                'sex': {0: 'Female', 1: 'Male', 2: 'Other'}.get(patient_data.get('SEX'), 'Unknown'),
                 'patient_type': 'Inpatient' if patient_data.get('PATIENTTYPE') == 1 else 'Outpatient',
                 'onset_of_illness': patient_data.get('onset_of_illness', ''),
                 'duration_of_illness_days': patient_data.get('durationofillness'),
