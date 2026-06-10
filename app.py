@@ -62,6 +62,9 @@ from data_handler import (
     get_prediction_stats,
 )
 
+# Dashboard pages (KPI summary + record management)
+from dashboard import render_dashboard_page, render_view_records_page
+
 
 # Page configuration - with error handling for deployment consistency
 try:
@@ -130,7 +133,7 @@ def main():
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to:", ["Home", "Prediction", "About"], key='navigation_page')
+    page = st.sidebar.radio("Go to:", ["Home", "Prediction", "Dashboard", "View Records", "About"], key='navigation_page')
 
     if page == "Home":
         st.markdown(
@@ -156,6 +159,12 @@ def main():
         and get comprehensive virus classification results.
         """)
         st.warning("**Medical Disclaimer**: This system is designed to assist healthcare professionals and should not be used as a substitute for professional medical diagnosis, treatment, or advice. Always consult qualified medical personnel for patient care decisions.")
+
+    elif page == "Dashboard":
+        render_dashboard_page()
+
+    elif page == "View Records":
+        render_view_records_page()
 
     elif page == "About":
         st.title("About Virus Detection System")
@@ -189,6 +198,8 @@ def main():
         st.title("🦠 Virus Detection and Classification System")
         st.markdown("---")
         st.write("Enter patient information and clinical symptoms to predict the most likely virus.")
+        st.button("➕ New Case (clear the form for a new patient)",
+                  on_click=request_reset_prediction_workflow, key="prediction_new_case")
 
         # Initialize virus predictor (cached for performance)
         try:
@@ -611,6 +622,16 @@ def main():
                             'date_of_report': date_of_report,
                             }
 
+                            # Doctor recommendation is OPTIONAL at enrolment. If every
+                            # recommendation/lab field is blank, the case is still enrolled
+                            # but stays DR-pending (complete it later from
+                            # View Records -> Update DR). Filling any field marks it completed.
+                            dr_provided = any([
+                                doctor_recommended, str(lab_id).strip(), test_performed,
+                                str(sample_type).strip(), str(diagnostic_method).strip(),
+                                confirmed_pathogen,
+                            ])
+
                             try:
                                 report_id = save_prediction_to_db(
                                     patient_data=patient_data_for_save,
@@ -618,7 +639,7 @@ def main():
                                     model_info=pred_results.get('model_info', {'model1': 'CustomMajor', 'model2': 'CustomOther'}),
                                     state_name=pred_results.get('selected_state_name'),
                                     district_name=pred_results.get('selected_district_name'),
-                                    doctor_lab_data=doctor_lab_data
+                                    doctor_lab_data=(doctor_lab_data if dr_provided else None)
                                 )
                                 if report_id:
                                     st.session_state['saved_id'] = report_id

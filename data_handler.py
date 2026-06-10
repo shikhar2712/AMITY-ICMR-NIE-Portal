@@ -494,11 +494,12 @@ class DataHandler:
             # Build query to exclude MongoDB internal fields
             projection = {'_id': 0, 'encoded_data': 0}  # Exclude internal fields
             
-            # Get records
+            # Get records (exclude soft-deleted)
+            not_deleted = {'is_deleted': {'$ne': True}}
             if limit:
-                cursor = collection.find({}, projection).sort('prediction_timestamp', -1).limit(limit)
+                cursor = collection.find(not_deleted, projection).sort('prediction_timestamp', -1).limit(limit)
             else:
-                cursor = collection.find({}, projection).sort('prediction_timestamp', -1)
+                cursor = collection.find(not_deleted, projection).sort('prediction_timestamp', -1)
             
             records = list(cursor)
             
@@ -613,6 +614,97 @@ class DataHandler:
                 }
             }
 
+    # ------------------------------------------------------------------
+    # Dashboard & record-management helpers (added for the Dashboard task)
+    # ------------------------------------------------------------------
+    def get_dashboard_metrics(self) -> Dict:
+        """Summary counts for the Dashboard page (excludes soft-deleted records)."""
+        empty = {'enrolled': 0, 'dr_completed': 0, 'dr_pending': 0,
+                 'daily': 0, 'weekly': 0, 'monthly': 0}
+        try:
+            if self.db is None:
+                return empty
+            from datetime import timedelta
+            col = self.db['virus_predictions']
+            live = {'is_deleted': {'$ne': True}}
+            enrolled = col.count_documents(live)
+            completed = col.count_documents({**live, 'doctor_lab_submitted_at': {'$ne': None}})
+            now = datetime.utcnow()
+            start_today = datetime(now.year, now.month, now.day)
+            daily = col.count_documents({**live, 'prediction_timestamp': {'$gte': start_today}})
+            weekly = col.count_documents({**live, 'prediction_timestamp': {'$gte': now - timedelta(days=7)}})
+            monthly = col.count_documents({**live, 'prediction_timestamp': {'$gte': now - timedelta(days=30)}})
+            return {'enrolled': enrolled, 'dr_completed': completed,
+                    'dr_pending': max(0, enrolled - completed),
+                    'daily': daily, 'weekly': weekly, 'monthly': monthly}
+        except Exception as e:
+            logger.error(f"Error computing dashboard metrics: {e}")
+            return empty
+
+    def get_records(self, include_deleted: bool = False, limit: int = 500) -> List[Dict]:
+        """Return saved prediction records for the View page (newest first)."""
+        try:
+            if self.db is None:
+                return []
+            col = self.db['virus_predictions']
+            query = {} if include_deleted else {'is_deleted': {'$ne': True}}
+            cursor = col.find(query).sort('prediction_timestamp', -1).limit(limit)
+            records = []
+            for doc in cursor:
+                doc['_id'] = str(doc['_id'])
+                records.append(doc)
+            return records
+        except Exception as e:
+            logger.error(f"Error fetching records: {e}")
+            return []
+
+    def get_record(self, doc_id: str) -> Optional[Dict]:
+        """Return a single record by its document id."""
+        try:
+            if self.db is None:
+                return None
+            from bson import ObjectId
+            doc = self.db['virus_predictions'].find_one({'_id': ObjectId(doc_id)})
+            if doc:
+                doc['_id'] = str(doc['_id'])
+            return doc
+        except Exception as e:
+            logger.error(f"Error fetching record {doc_id}: {e}")
+            return None
+
+    def update_patient_record(self, doc_id: str, fields: Dict) -> bool:
+        """Update editable patient fields on an existing record."""
+        try:
+            if self.db is None:
+                return False
+            from bson import ObjectId
+            fields = {k: v for k, v in (fields or {}).items() if k != '_id'}
+            if not fields:
+                return False
+            result = self.db['virus_predictions'].update_one(
+                {'_id': ObjectId(doc_id)},
+                {'$set': {**fields, 'last_updated': datetime.utcnow()}}
+            )
+            return result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Error updating record {doc_id}: {e}")
+            return False
+
+    def soft_delete_record(self, doc_id: str) -> bool:
+        """Soft-delete a record (hidden from views, kept in the database)."""
+        try:
+            if self.db is None:
+                return False
+            from bson import ObjectId
+            result = self.db['virus_predictions'].update_one(
+                {'_id': ObjectId(doc_id)},
+                {'$set': {'is_deleted': True, 'deleted_at': datetime.utcnow()}}
+            )
+            return result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Error soft-deleting record {doc_id}: {e}")
+            return False
+
 # Global data handler instance
 data_handler = DataHandler()
 
@@ -648,3 +740,24 @@ def get_prediction_stats() -> Dict:
 def export_data_to_csv(limit: int = None) -> Optional[pd.DataFrame]:
     """Export data to CSV-ready DataFrame"""
     return data_handler.export_to_csv(limit)
+
+# --- Dashboard / record-management convenience wrappers ---
+def get_dashboard_metrics() -> Dict:
+    """Summary counts for the Dashboard page."""
+    return data_handler.get_dashboard_metrics()
+
+def get_records(include_deleted: bool = False, limit: int = 500) -> List[Dict]:
+    """List saved prediction records (newest first)."""
+    return data_handler.get_records(include_deleted=include_deleted, limit=limit)
+
+def get_record(doc_id: str) -> Optional[Dict]:
+    """Fetch a single record by id."""
+    return data_handler.get_record(doc_id)
+
+def update_patient_record_in_db(doc_id: str, fields: Dict) -> bool:
+    """Update editable patient fields on a record."""
+    return data_handler.update_patient_record(doc_id, fields)
+
+def soft_delete_record_in_db(doc_id: str) -> bool:
+    """Soft-delete a record."""
+    return data_handler.soft_delete_record(doc_id)
