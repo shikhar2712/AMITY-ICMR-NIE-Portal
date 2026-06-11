@@ -248,7 +248,7 @@ def main():
             patient_data['department_other_specification'] = ""
         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
-        patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="", key=widget_key('patient_name'))
+        patient_data['patient_id_input'] = st.sidebar.text_input("Patient ID No.", value="", key=widget_key('patient_id_no'), placeholder="e.g., ICMR-2026-00123")
 
         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
         with st.sidebar.expander("Address & Location (expand)", expanded=False):

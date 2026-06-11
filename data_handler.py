@@ -134,7 +134,7 @@ class DataHandler:
                 'department': patient_data.get('department', ''),
                 'department_specification': patient_data.get('department_other_specification', ''),
                 'date_of_admission': patient_data.get('date_of_admission', ''),
-                'patient_name': patient_data.get('patient_name', ''),
+                'patient_id_no': patient_data.get('patient_id_input', ''),
                 'address_line': patient_data.get('address_line', ''),
                 'mobile_no': patient_data.get('mobile_no', ''),
 
