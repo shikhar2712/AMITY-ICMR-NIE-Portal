@@ -35,6 +35,10 @@ try:
 except Exception:  # defensive: tooling without torch installed
     VIRUS_MAPPING, OTHER_VIRUS_MAPPING = {}, {}
 
+# Suspected/Confirmed pathogen options come from the ICMR pathogen list, not the
+# model's output classes (kept in sync with the Prediction page).
+from pathogen_list import DR_SUSPECTED_PATHOGENS
+
 PAGE_SIZE = 15  # patients shown per page in View Records
 
 
@@ -490,8 +494,9 @@ def _render_edit_form(rec):
 
 def _render_update_dr_form(rec):
     st.subheader(f"🩺 Update Doctor Recommendation — Patient {_identifier(rec)}")
-    all_opts = _virus_options()
+    all_opts = _virus_options()          # model-derived (Test Performed)
     lab_opts = [""] + all_opts
+    dr_opts = DR_SUSPECTED_PATHOGENS      # ICMR list (Suspected + Confirmed pathogens)
 
     def _keep(values, allowed):
         return [x for x in values if x in allowed] if isinstance(values, list) else []
@@ -499,8 +504,8 @@ def _render_update_dr_form(rec):
     res_opts = ["", "Positive", "Negative"]
     with st.form(key=f"dr_form_{rec['_id']}"):
         doctor_recommended = st.multiselect(
-            "Doctor Recommended - Suspected Pathogens (up to 5)", options=all_opts,
-            default=_keep(rec.get('doctor_recommended_viruses'), all_opts))
+            "Doctor Recommended - Suspected Pathogens (up to 5)", options=dr_opts,
+            default=_keep(rec.get('doctor_recommended_viruses'), dr_opts))
         c1, c2 = st.columns(2)
         with c1:
             lab_id = st.text_input("Lab ID", value=rec.get('lab_id') or "")
@@ -514,8 +519,8 @@ def _render_update_dr_form(rec):
             lab_results = st.selectbox("Laboratory Results", options=res_opts,
                                        index=res_opts.index(rec['laboratory_results'])
                                        if rec.get('laboratory_results') in res_opts else 0)
-            confirmed = st.multiselect("Confirmed Pathogen", options=lab_opts,
-                                       default=_keep(rec.get('confirmed_pathogen'), lab_opts))
+            confirmed = st.multiselect("Confirmed Pathogen", options=dr_opts,
+                                       default=_keep(rec.get('confirmed_pathogen'), dr_opts))
             date_report = st.text_input("Date of Report (DD-MM-YYYY)", value=rec.get('date_of_report') or "")
 
         if st.form_submit_button("💾 Save Doctor Recommendation", type="primary", use_container_width=True):
