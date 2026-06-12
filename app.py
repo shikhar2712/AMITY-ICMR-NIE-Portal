@@ -10,6 +10,9 @@ from model_handler import (
     SYNDROME_MAPPING, SYNDROME_DISPLAY_MAPPING
 )
 
+# Doctor-recommendation pathogen list (frontend reference data; not a model input)
+from pathogen_list import DR_SUSPECTED_PATHOGENS
+
 refresh_virus_mappings()
 
 # Symptom display mapping (no-space keys -> user-friendly display names)
@@ -542,17 +545,20 @@ def main():
             saved_id = st.session_state.get('saved_id')
             form_key_suffix = saved_id if saved_id else 'pending'
 
-            # Build combined virus options from both major and other virus mappings
+            # 'Test Performed' keeps the model-derived virus options.
             major_viruses = list(VIRUS_MAPPING.values())
             other_viruses = list(OTHER_VIRUS_MAPPING.values())
             all_virus_options = sorted(list(set(major_viruses + other_viruses)))
             lab_virus_options = [""] + all_virus_options
+            # 'Suspected Pathogens' and 'Confirmed Pathogen' use the ICMR pathogen
+            # list (DR_Pathogen_List.csv) - independent of the model's outputs.
+            dr_pathogen_options = DR_SUSPECTED_PATHOGENS
 
             with st.form(key=f"doctor_lab_form_{form_key_suffix}"):
                 doctor_recommended = st.multiselect(
                     "Doctor Recommended - Suspected Pathogens (up to 5)",
-                    options=all_virus_options,
-                    help="Select up to 5 viruses from major and other virus lists"
+                    options=dr_pathogen_options,
+                    help="Select up to 5 suspected pathogens from the ICMR pathogen list"
                 )
 
                 lab_col1, lab_col2 = st.columns(2)
@@ -572,7 +578,7 @@ def main():
                     laboratory_results = st.selectbox("Laboratory Results", options=["Positive", "Negative"])
                     confirmed_pathogen = st.multiselect(
                         "Confirmed Pathogen",
-                        options=lab_virus_options,
+                        options=dr_pathogen_options,
                         key=f"confirmed_pathogen_{form_key_suffix}"
                     )
                     date_of_report = st.date_input("Date of Report", value=datetime.now(), key=f"date_of_report_{saved_id}").strftime('%d-%m-%Y')
