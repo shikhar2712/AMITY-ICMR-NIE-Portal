@@ -10,6 +10,9 @@ from model_handler import (
     SYNDROME_MAPPING, SYNDROME_DISPLAY_MAPPING
 )
 
+# Doctor-recommendation pathogen list (frontend reference data; not a model input)
+from pathogen_list import DR_SUSPECTED_PATHOGENS
+
 refresh_virus_mappings()
 
 # Symptom display mapping (no-space keys -> user-friendly display names)
