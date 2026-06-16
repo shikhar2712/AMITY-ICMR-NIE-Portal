@@ -61,6 +61,7 @@ SEX_LABELS = {0: "Female", 1: "Male", 2: "Other"}
 # Database imports (minimal addition)
 from data_handler import (
     save_prediction_to_db,
+    get_record,
     get_db_health,
     get_prediction_stats,
 )
@@ -237,11 +238,12 @@ def main():
         # 8) Address (expandable), 9) Mobile no.
         # Dates formatted as DD-MM-YYYY to match the requested format
         patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
-        patient_data['patient_study_id'] = st.sidebar.text_input("Patient Study ID (e.g., MMC 01)", value="", key=widget_key('patient_study_id'))
+        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
         patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
-        # Only two study-site options as requested
-        patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0, key=widget_key('hospital'))
-        patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
+        # Only two study-site options as requested. "Select..." is the default so the
+        # user must actively choose (validated before prediction).
+        patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["Select...", "MMC", "TMC"], index=0, key=widget_key('hospital'))
+        patient_data['department'] = st.sidebar.selectbox("Department", options=["Select...", "Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
         if patient_data['department'] == "Other":
             patient_data['department_other_specification'] = st.sidebar.text_input(
                 "Specify Department", value="", key=widget_key('department_other'),
@@ -251,7 +253,8 @@ def main():
             patient_data['department_other_specification'] = ""
         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
-        patient_data['patient_id_input'] = st.sidebar.text_input("Patient ID No.", value="", key=widget_key('patient_id_no'), placeholder="e.g., ICMR-2026-00123")
+        # Patient ID is auto-assigned (P001, P002, ...) by the database on enrolment.
+        st.sidebar.text_input("Patient ID No.", value="Auto-assigned on enrolment", disabled=True, key=widget_key('patient_id_no'))
 
         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
         with st.sidebar.expander("Address & Location (expand)", expanded=False):
@@ -287,11 +290,11 @@ def main():
         st.sidebar.markdown("---")
 
         # Remaining fields shown below the top requested order
-        patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1, key=widget_key('age'))
-        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1, 2],
-                                format_func=lambda x: SEX_LABELS[x], index=1, key=widget_key('sex'))
-        patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[0, 1], 
-                                    format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1, key=widget_key('patient_type'))
+        patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=0, step=1, key=widget_key('age'))
+        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[None, 0, 1, 2],
+                                format_func=lambda x: "Select..." if x is None else SEX_LABELS[x], index=0, key=widget_key('sex'))
+        patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[None, 0, 1],
+                                    format_func=lambda x: "Select..." if x is None else ("Outpatient" if x == 0 else "Inpatient"), index=0, key=widget_key('patient_type'))
         onset_date = st.sidebar.date_input("Onset of Illness", value=datetime.now(), key=widget_key('onset_of_illness'))
         patient_data['onset_of_illness'] = onset_date.strftime('%d-%m-%Y')
         duration_of_illness = max(0, (admission_date - onset_date).days)
@@ -364,10 +367,24 @@ def main():
 
         # Prediction button
         if st.button("Predict Virus", type="primary", use_container_width=True):
+            # Required selections must be chosen before predicting. Sex & Patient Type
+            # feed the model; Hospital & Department are mandatory metadata.
+            missing_required = []
+            if patient_data.get('hospital') in (None, "Select..."):
+                missing_required.append("Hospital")
+            if patient_data.get('department') in (None, "Select..."):
+                missing_required.append("Department")
+            if patient_data.get('SEX') is None:
+                missing_required.append("Sex")
+            if patient_data.get('PATIENTTYPE') is None:
+                missing_required.append("Patient Type")
+
             # Check if at least one symptom is selected
             symptoms_selected = any(patient_data.get(symptom, 0) == 1 for symptom in ALL_SYMPTOMS)
-            
-            if not symptoms_selected:
+
+            if missing_required:
+                st.warning(f"Please select {', '.join(missing_required)} before making a prediction.")
+            elif not symptoms_selected:
                 st.warning("Please select at least one symptom before making a prediction.")
                 st.info("Expand the symptom groups above and check the boxes for symptoms present in the patient.")
             else:
@@ -535,132 +552,70 @@ def main():
                         import traceback
                         st.error(traceback.format_exc())
 
-        # Doctor recommendation and laboratory section - shown after prediction
+        # After prediction, the patient is ENROLLED (saved as a Pending record). The
+        # Doctor Recommendation & Laboratory details are completed later, in one place
+        # only: View Records -> Update DR.
         if 'prediction_results' in st.session_state:
             st.markdown("---")
-            st.subheader("🧑‍⚕️ Doctor Recommendation & Laboratory Variables")
-            st.info("Fill these fields after prediction, then click 'Save the Report' to store the full report in database.")
+            st.subheader("📝 Enrol Patient")
 
-            pred_results = st.session_state['prediction_results']
             saved_id = st.session_state.get('saved_id')
-            form_key_suffix = saved_id if saved_id else 'pending'
+            if saved_id:
+                enrolled_pid = st.session_state.get('saved_patient_id')
+                pid_label = f" Patient ID: **{enrolled_pid}**." if enrolled_pid else ""
+                st.success(f"✅ Patient enrolled.{pid_label} Status: 🔴 Pending doctor recommendation.")
+                st.info("Add the lab & doctor-recommendation details later from **View Records → Update DR**.")
+            else:
+                st.info("Enrol this patient to save the record. Doctor Recommendation & Laboratory "
+                        "details are added later from **View Records → Update DR**.")
+                if st.button("Enrol Patient", type="primary", use_container_width=True, key="enrol_patient"):
+                    pred_results = st.session_state['prediction_results']
+                    patient_data_for_save = pred_results['patient_data']
 
-            # 'Test Performed' keeps the model-derived virus options.
-            major_viruses = list(VIRUS_MAPPING.values())
-            other_viruses = list(OTHER_VIRUS_MAPPING.values())
-            all_virus_options = sorted(list(set(major_viruses + other_viruses)))
-            lab_virus_options = [""] + all_virus_options
-            # 'Suspected Pathogens' and 'Confirmed Pathogen' use the ICMR pathogen
-            # list (DR_Pathogen_List.csv) - independent of the model's outputs.
-            dr_pathogen_options = DR_SUSPECTED_PATHOGENS
+                    # Validate optional contact fields at save time
+                    mobile_raw = str(patient_data_for_save.get('mobile_no', '')).strip()
+                    pin_raw = str(patient_data_for_save.get('pin_code', '')).strip()
+                    invalid_fields = []
+                    if mobile_raw:
+                        mobile_digits = ''.join(ch for ch in mobile_raw if ch.isdigit())
+                        if len(mobile_digits) != 10:
+                            invalid_fields.append('Mobile No (must be 10 digits)')
+                    if pin_raw:
+                        if not pin_raw.isdigit() or len(pin_raw) != 6:
+                            invalid_fields.append('Pin Code (must be 6 digits)')
 
-            with st.form(key=f"doctor_lab_form_{form_key_suffix}"):
-                doctor_recommended = st.multiselect(
-                    "Doctor Recommended - Suspected Pathogens (up to 5)",
-                    options=dr_pathogen_options,
-                    help="Select up to 5 suspected pathogens from the ICMR pathogen list"
-                )
-
-                lab_col1, lab_col2 = st.columns(2)
-
-                with lab_col1:
-                    lab_id = st.text_input("Lab ID", placeholder="A123456")
-                    test_performed = st.multiselect(
-                        "Test Performed",
-                        options=lab_virus_options,
-                        key=f"test_performed_{form_key_suffix}"
-                    )
-                    date_of_sample_collection = st.date_input("Date of Sample Collection", value=datetime.now()).strftime('%d-%m-%Y')
-                    sample_type = st.text_input("Sample Type")
-
-                with lab_col2:
-                    diagnostic_method = st.text_input("Diagnostic Method")
-                    laboratory_results = st.selectbox("Laboratory Results", options=["Positive", "Negative"])
-                    confirmed_pathogen = st.multiselect(
-                        "Confirmed Pathogen",
-                        options=dr_pathogen_options,
-                        key=f"confirmed_pathogen_{form_key_suffix}"
-                    )
-                    date_of_report = st.date_input("Date of Report", value=datetime.now(), key=f"date_of_report_{saved_id}").strftime('%d-%m-%Y')
-
-                report_already_saved = bool(saved_id)
-                doctor_lab_submitted = st.form_submit_button(
-                    "Save the Report",
-                    type="secondary",
-                    use_container_width=True,
-                    disabled=report_already_saved
-                )
-
-                if report_already_saved:
-                    st.caption(f"Report already saved. Document ID: {saved_id[:8]}...")
-
-                if doctor_lab_submitted:
-                    if len(doctor_recommended) > 5:
-                        st.warning("⚠️ Please select at most 5 suspected pathogens.")
+                    if invalid_fields:
+                        st.warning(f"⚠️ Patient not enrolled: {', '.join(invalid_fields)}")
                     else:
-                        # Validate mobile and pin at save time (optional fields)
-                        patient_data_for_save = pred_results['patient_data']
-                        mobile_raw = str(patient_data_for_save.get('mobile_no', '')).strip()
-                        pin_raw = str(patient_data_for_save.get('pin_code', '')).strip()
-                        invalid_fields = []
+                        try:
+                            # doctor_lab_data=None -> record saved as Pending (DR completed later).
+                            report_id = save_prediction_to_db(
+                                patient_data=patient_data_for_save,
+                                prediction_result=pred_results['prediction_result_for_db'],
+                                model_info=pred_results.get('model_info', {'model1': 'CustomMajor', 'model2': 'CustomOther'}),
+                                state_name=pred_results.get('selected_state_name'),
+                                district_name=pred_results.get('selected_district_name'),
+                                doctor_lab_data=None
+                            )
+                            if report_id:
+                                st.session_state['saved_id'] = report_id
+                                # Surface the auto-assigned sequential Patient ID (P001, ...).
+                                try:
+                                    rec = get_record(report_id)
+                                    st.session_state['saved_patient_id'] = rec.get('patient_id') if rec else None
+                                except Exception:
+                                    st.session_state['saved_patient_id'] = None
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to enrol patient. Please try again.")
+                        except Exception as enrol_error:
+                            st.error(f"❌ Enrolment error: {str(enrol_error)}")
 
-                        if mobile_raw:
-                            mobile_digits = ''.join(ch for ch in mobile_raw if ch.isdigit())
-                            if len(mobile_digits) != 10:
-                                invalid_fields.append('Mobile No (must be 10 digits)')
-
-                        if pin_raw:
-                            if not pin_raw.isdigit() or len(pin_raw) != 6:
-                                invalid_fields.append('Pin Code (must be 6 digits)')
-
-                        if invalid_fields:
-                            st.warning(f"⚠️ Report not saved: {', '.join(invalid_fields)}")
-                        else:
-                            doctor_lab_data = {
-                            'doctor_recommended_viruses': doctor_recommended,
-                            'lab_id': lab_id,
-                            'test_performed': test_performed,
-                            'date_of_sample_collection': date_of_sample_collection,
-                            'sample_type': sample_type,
-                            'diagnostic_method': diagnostic_method,
-                            'laboratory_results': laboratory_results,
-                            'confirmed_pathogen': confirmed_pathogen,
-                            'date_of_report': date_of_report,
-                            }
-
-                            # Doctor recommendation is OPTIONAL at enrolment. If every
-                            # recommendation/lab field is blank, the case is still enrolled
-                            # but stays DR-pending (complete it later from
-                            # View Records -> Update DR). Filling any field marks it completed.
-                            dr_provided = any([
-                                doctor_recommended, str(lab_id).strip(), test_performed,
-                                str(sample_type).strip(), str(diagnostic_method).strip(),
-                                confirmed_pathogen,
-                            ])
-
-                            try:
-                                report_id = save_prediction_to_db(
-                                    patient_data=patient_data_for_save,
-                                    prediction_result=pred_results['prediction_result_for_db'],
-                                    model_info=pred_results.get('model_info', {'model1': 'CustomMajor', 'model2': 'CustomOther'}),
-                                    state_name=pred_results.get('selected_state_name'),
-                                    district_name=pred_results.get('selected_district_name'),
-                                    doctor_lab_data=(doctor_lab_data if dr_provided else None)
-                                )
-                                if report_id:
-                                    st.session_state['saved_id'] = report_id
-                                    st.success("✅ Full report saved successfully.")
-                                    st.caption(f"Report ID: {report_id[:8]}...")
-                                else:
-                                    st.error("❌ Failed to save report. Please try again.")
-                            except Exception as report_save_error:
-                                st.error(f"❌ Report save error: {str(report_save_error)}")
-
-            reset_requested = st.button(
+            st.button(
                 "Reset All Inputs",
                 type="secondary",
                 use_container_width=True,
-                key=f"reset_all_inputs_{form_key_suffix}",
+                key="reset_all_inputs",
                 on_click=request_reset_prediction_workflow
             )
 

@@ -508,7 +508,7 @@ def _render_update_dr_form(rec):
             default=_keep(rec.get('doctor_recommended_viruses'), dr_opts))
         c1, c2 = st.columns(2)
         with c1:
-            lab_id = st.text_input("Lab ID", value=rec.get('lab_id') or "")
+            lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
             test_performed = st.multiselect("Test Performed", options=lab_opts,
                                             default=_keep(rec.get('test_performed'), lab_opts))
             sample_type = st.text_input("Sample Type", value=rec.get('sample_type') or "")
@@ -524,7 +524,9 @@ def _render_update_dr_form(rec):
             date_report = st.text_input("Date of Report (DD-MM-YYYY)", value=rec.get('date_of_report') or "")
 
         if st.form_submit_button("💾 Save Doctor Recommendation", type="primary", use_container_width=True):
-            if len(doctor_recommended) > 5:
+            if not lab_id.strip():
+                st.warning("⚠️ Lab ID is required to complete this case. It stays 🔴 Pending until a Lab ID is entered.")
+            elif len(doctor_recommended) > 5:
                 st.warning("⚠️ Please select at most 5 suspected pathogens.")
             else:
                 payload = {

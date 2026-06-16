@@ -126,6 +126,7 @@ class DataHandler:
             # Transform patient data to human-readable format
             readable_patient_info = {
                 'patient_id': patient_id,
+                'patient_name': patient_data.get('patient_name', ''),
                 # Keep core patient administrative fields first (matching app input order)
                 'date_of_collection': patient_data.get('date_of_collection', ''),
                 'patient_study_id': patient_data.get('patient_study_id', ''),
