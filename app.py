@@ -232,17 +232,20 @@ def main():
 
         patient_data = {}
 
-        # Top section order as requested in the specification image
-        # 1) Date of collection, 2) Patient study ID, 3) Patient MRD ID,
-        # 4) Hospital, 5) Department, 6) Date of admission, 7) Name,
-        # 8) Address (expandable), 9) Mobile no.
-        # Dates formatted as DD-MM-YYYY to match the requested format
+        # Field order (ICMR-specified):
+        # 1) Date of Collection, 2) Patient MRD ID, 3) Hospital,
+        # 4) Patient Study ID (auto, hospital-based), 5) Department,
+        # 6) Date of Admission, 7) Patient Name, 8) Address, 9) Mobile No.
+        # Dates formatted as DD-MM-YYYY to match the requested format.
         patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
-        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
         patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
         # Only two study-site options as requested. "Select..." is the default so the
         # user must actively choose (validated before prediction).
         patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["Select...", "MMC", "TMC"], index=0, key=widget_key('hospital'))
+        # Patient Study ID is auto-assigned from the Hospital on enrolment
+        # (MMC -> M01, TMC -> T01, ...). Shown read-only here; the assigned value
+        # is surfaced after enrolment, like the internal Patient ID.
+        st.sidebar.text_input("Patient Study ID (Auto-generated)", value="Auto-assigned on enrolment (based on Hospital)", disabled=True, key=widget_key('patient_study_id'))
         patient_data['department'] = st.sidebar.selectbox("Department", options=["Select...", "Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
         if patient_data['department'] == "Other":
             patient_data['department_other_specification'] = st.sidebar.text_input(
@@ -253,8 +256,7 @@ def main():
             patient_data['department_other_specification'] = ""
         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
-        # Patient ID is auto-assigned (P001, P002, ...) by the database on enrolment.
-        st.sidebar.text_input("Patient ID No.", value="Auto-assigned on enrolment", disabled=True, key=widget_key('patient_id_no'))
+        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
 
         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
         with st.sidebar.expander("Address & Location (expand)", expanded=False):
@@ -562,8 +564,14 @@ def main():
             saved_id = st.session_state.get('saved_id')
             if saved_id:
                 enrolled_pid = st.session_state.get('saved_patient_id')
-                pid_label = f" Patient ID: **{enrolled_pid}**." if enrolled_pid else ""
-                st.success(f"✅ Patient enrolled.{pid_label} Status: 🔴 Pending doctor recommendation.")
+                enrolled_sid = st.session_state.get('saved_study_id')
+                id_bits = []
+                if enrolled_sid:
+                    id_bits.append(f"Study ID: **{enrolled_sid}**")
+                if enrolled_pid:
+                    id_bits.append(f"Record ID: **{enrolled_pid}**")
+                id_label = (" " + " · ".join(id_bits) + ".") if id_bits else ""
+                st.success(f"✅ Patient enrolled.{id_label} Status: 🔴 Pending doctor recommendation.")
                 st.info("Add the lab & doctor-recommendation details later from **View Records → Update DR**.")
             else:
                 st.info("Enrol this patient to save the record. Doctor Recommendation & Laboratory "
@@ -599,12 +607,15 @@ def main():
                             )
                             if report_id:
                                 st.session_state['saved_id'] = report_id
-                                # Surface the auto-assigned sequential Patient ID (P001, ...).
+                                # Surface the auto-assigned IDs: hospital-based Study ID
+                                # (M01/T01) and the internal sequential Record ID (P001).
                                 try:
                                     rec = get_record(report_id)
                                     st.session_state['saved_patient_id'] = rec.get('patient_id') if rec else None
+                                    st.session_state['saved_study_id'] = rec.get('patient_study_id') if rec else None
                                 except Exception:
                                     st.session_state['saved_patient_id'] = None
+                                    st.session_state['saved_study_id'] = None
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to enrol patient. Please try again.")
