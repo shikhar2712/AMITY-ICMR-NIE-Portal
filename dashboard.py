@@ -380,7 +380,7 @@ def _build_export_df(recs):
             "Department": r.get('department') or "—",
             "Date of Admission": r.get('date_of_admission') or "—",
             "Patient Name": _patient_name(r) or "—",
-            "Address": r.get('address') or "—",
+            "Address": r.get('address_line') or r.get('address') or "—",
             "Mobile No": r.get('mobile_no') or "—",
             "Lab ID": r.get('lab_id') or "",
             "Age": r.get('age') if r.get('age') not in (None, "") else "—",
