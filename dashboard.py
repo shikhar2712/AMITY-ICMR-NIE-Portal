@@ -382,7 +382,15 @@ def _build_export_df(recs):
             "Patient Name": _patient_name(r) or "—",
             "Address": r.get('address') or "—",
             "Mobile No": r.get('mobile_no') or "—",
+            "Lab ID": r.get('lab_id') or "",
+            "Age": r.get('age') if r.get('age') not in (None, "") else "—",
+            "Sex": r.get('sex') or "—",
+            "Patient Type": r.get('patient_type') or "—",
+            "Onset of Illness": r.get('onset_of_illness') or "—",
+            "Duration of Illness (days)": r.get('duration_of_illness_days')
+                if r.get('duration_of_illness_days') not in (None, "") else "—",
         }
+        
         # Top 5 predictions, ranked, with probability percentages.
         for n in range(1, 6):
             conf = r.get(f'top_{n}_confidence')
@@ -395,7 +403,8 @@ def _build_export_df(recs):
         rows.append(row)
 
     cols = ["Date of Collection", "Patient MRD ID", "Hospital", "Patient Study ID",
-            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No"]
+            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No", "Lab ID",
+            "Age", "Sex", "Patient Type", "Onset of Illness", "Duration of Illness (days)"]
     for n in range(1, 6):
         cols += [f"Top {n} Virus", f"Top {n} Probability (%)"]
     return pd.DataFrame(rows, columns=cols)
