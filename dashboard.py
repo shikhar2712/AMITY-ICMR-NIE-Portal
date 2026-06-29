@@ -494,48 +494,25 @@ def _render_edit_form(rec):
 
 def _render_update_dr_form(rec):
     st.subheader(f"🩺 Update Doctor Recommendation — Patient {_identifier(rec)}")
-    all_opts = _virus_options()          # model-derived (Test Performed)
-    lab_opts = [""] + all_opts
-    dr_opts = DR_SUSPECTED_PATHOGENS      # ICMR list (Suspected + Confirmed pathogens)
-
-    def _keep(values, allowed):
-        return [x for x in values if x in allowed] if isinstance(values, list) else []
-
-    res_opts = ["", "Positive", "Negative"]
+    pathogen_options = [""] + DR_SUSPECTED_PATHOGENS
+    current_pathogen = rec.get('confirmed_pathogen') or ""
+    default_idx = pathogen_options.index(current_pathogen) if current_pathogen in pathogen_options else 0
     with st.form(key=f"dr_form_{rec['_id']}"):
-        doctor_recommended = st.multiselect(
-            "Doctor Recommended - Suspected Pathogens (up to 5)", options=dr_opts,
-            default=_keep(rec.get('doctor_recommended_viruses'), dr_opts))
-        c1, c2 = st.columns(2)
-        with c1:
-            lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
-            test_performed = st.multiselect("Test Performed", options=lab_opts,
-                                            default=_keep(rec.get('test_performed'), lab_opts))
-            sample_type = st.text_input("Sample Type", value=rec.get('sample_type') or "")
-            date_sample = st.text_input("Date of Sample Collection (DD-MM-YYYY)",
-                                        value=rec.get('date_of_sample_collection') or "")
-        with c2:
-            diagnostic_method = st.text_input("Diagnostic Method", value=rec.get('diagnostic_method') or "")
-            lab_results = st.selectbox("Laboratory Results", options=res_opts,
-                                       index=res_opts.index(rec['laboratory_results'])
-                                       if rec.get('laboratory_results') in res_opts else 0)
-            confirmed = st.multiselect("Confirmed Pathogen", options=dr_opts,
-                                       default=_keep(rec.get('confirmed_pathogen'), dr_opts))
-            date_report = st.text_input("Date of Report (DD-MM-YYYY)", value=rec.get('date_of_report') or "")
+        lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
+        confirmed_pathogen = st.selectbox(
+            "Confirmed Pathogen",
+            options=pathogen_options,
+            index=default_idx,
+        )
 
         if st.form_submit_button("💾 Save Doctor Recommendation", type="primary", use_container_width=True):
             if not lab_id.strip():
                 st.warning("⚠️ Lab ID is required to complete this case. It stays 🔴 Pending until a Lab ID is entered.")
-            elif len(doctor_recommended) > 5:
-                st.warning("⚠️ Please select at most 5 suspected pathogens.")
             else:
                 payload = {
                     'prediction_id': rec['_id'],
-                    'doctor_recommended_viruses': doctor_recommended,
-                    'lab_id': lab_id.strip(), 'test_performed': test_performed,
-                    'date_of_sample_collection': date_sample.strip(), 'sample_type': sample_type.strip(),
-                    'diagnostic_method': diagnostic_method.strip(), 'laboratory_results': lab_results,
-                    'confirmed_pathogen': confirmed, 'date_of_report': date_report.strip(),
+                    'lab_id': lab_id.strip(),
+                    'confirmed_pathogen': confirmed_pathogen,
                 }
                 if save_doctor_lab_data_to_db(payload):
                     _flash("✅ Doctor recommendation saved — case marked completed.")
