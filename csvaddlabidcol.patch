@@ -1,0 +1,35 @@
+From 52adbfeeeb36a46ee96e44d25454075d5239d7b1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 24 Jun 2026 11:13:45 +0000
+Subject: [PATCH] CSV export: add Lab ID column (blank if not yet entered)
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014HDPmuGuqSWsHPmkq6rViq
+---
+ dashboard.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/dashboard.py b/dashboard.py
+index c38e816..482c7e7 100644
+--- a/dashboard.py
++++ b/dashboard.py
+@@ -382,6 +382,7 @@ def _build_export_df(recs):
+             "Patient Name": _patient_name(r) or "—",
+             "Address": r.get('address') or "—",
+             "Mobile No": r.get('mobile_no') or "—",
++            "Lab ID": r.get('lab_id') or "",
+         }
+         # Top 5 predictions, ranked, with probability percentages.
+         for n in range(1, 6):
+@@ -395,7 +396,7 @@ def _build_export_df(recs):
+         rows.append(row)
+ 
+     cols = ["Date of Collection", "Patient MRD ID", "Hospital", "Patient Study ID",
+-            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No"]
++            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No", "Lab ID"]
+     for n in range(1, 6):
+         cols += [f"Top {n} Virus", f"Top {n} Probability (%)"]
+     return pd.DataFrame(rows, columns=cols)
+-- 
+2.43.0
+

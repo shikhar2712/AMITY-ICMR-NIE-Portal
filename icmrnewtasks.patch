@@ -1,0 +1,314 @@
+From ecddd08e7425e72b2abf53a532bb0c84b6a9ba36 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 19 Jun 2026 06:20:54 +0000
+Subject: [PATCH] ICMR: per-patient/multi/all CSV, Top 5 in CSV, hospital Study
+ ID, reorder fields
+
+Task 1 (dashboard.py): View Records grid is now multi-row selectable.
+- 'Download All' exports every patient in the current filter (Select All).
+- Selecting multiple rows shows 'Download Selected (N)'.
+- A single selection keeps the View/Edit/Update DR/Delete action bar and adds
+  a per-patient 'CSV' download.
+
+Task 2 (dashboard.py): downloaded CSV now includes the Top 5 predicted viruses
+with probabilities (Top 1..5 Virus + Probability % columns), one row per
+patient. The values are already stored on each record, so nothing is recomputed
+and the model is never touched.
+
+Task 3 (data_handler.py + app.py): Patient Study ID is auto-generated per
+hospital (MMC -> M01, TMC -> T01, ...) via a per-hospital atomic MongoDB
+counter, assigned at enrolment. Existing records are untouched. app.py shows the
+assigned Study ID after enrolment and a read-only placeholder on the form.
+
+Task 4 (app.py): prediction inputs reordered to Date of Collection, Patient MRD
+ID, Hospital, Patient Study ID (auto), Department, Date of Admission, Patient
+Name, Address, Mobile No.
+
+No model/.pth files touched. No prediction logic changed.
+
+diff --git a/app.py b/app.py
+index 6ff2e28..5e50b6b 100644
+--- a/app.py
++++ b/app.py
+@@ -232,17 +232,20 @@ def main():
+ 
+         patient_data = {}
+ 
+-        # Top section order as requested in the specification image
+-        # 1) Date of collection, 2) Patient study ID, 3) Patient MRD ID,
+-        # 4) Hospital, 5) Department, 6) Date of admission, 7) Name,
+-        # 8) Address (expandable), 9) Mobile no.
+-        # Dates formatted as DD-MM-YYYY to match the requested format
++        # Field order (ICMR-specified):
++        # 1) Date of Collection, 2) Patient MRD ID, 3) Hospital,
++        # 4) Patient Study ID (auto, hospital-based), 5) Department,
++        # 6) Date of Admission, 7) Patient Name, 8) Address, 9) Mobile No.
++        # Dates formatted as DD-MM-YYYY to match the requested format.
+         patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
+-        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
+         patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
+         # Only two study-site options as requested. "Select..." is the default so the
+         # user must actively choose (validated before prediction).
+         patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["Select...", "MMC", "TMC"], index=0, key=widget_key('hospital'))
++        # Patient Study ID is auto-assigned from the Hospital on enrolment
++        # (MMC -> M01, TMC -> T01, ...). Shown read-only here; the assigned value
++        # is surfaced after enrolment, like the internal Patient ID.
++        st.sidebar.text_input("Patient Study ID (Auto-generated)", value="Auto-assigned on enrolment (based on Hospital)", disabled=True, key=widget_key('patient_study_id'))
+         patient_data['department'] = st.sidebar.selectbox("Department", options=["Select...", "Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
+         if patient_data['department'] == "Other":
+             patient_data['department_other_specification'] = st.sidebar.text_input(
+@@ -253,8 +256,7 @@ def main():
+             patient_data['department_other_specification'] = ""
+         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
+         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
+-        # Patient ID is auto-assigned (P001, P002, ...) by the database on enrolment.
+-        st.sidebar.text_input("Patient ID No.", value="Auto-assigned on enrolment", disabled=True, key=widget_key('patient_id_no'))
++        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
+ 
+         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
+         with st.sidebar.expander("Address & Location (expand)", expanded=False):
+@@ -562,8 +564,14 @@ def main():
+             saved_id = st.session_state.get('saved_id')
+             if saved_id:
+                 enrolled_pid = st.session_state.get('saved_patient_id')
+-                pid_label = f" Patient ID: **{enrolled_pid}**." if enrolled_pid else ""
+-                st.success(f"✅ Patient enrolled.{pid_label} Status: 🔴 Pending doctor recommendation.")
++                enrolled_sid = st.session_state.get('saved_study_id')
++                id_bits = []
++                if enrolled_sid:
++                    id_bits.append(f"Study ID: **{enrolled_sid}**")
++                if enrolled_pid:
++                    id_bits.append(f"Record ID: **{enrolled_pid}**")
++                id_label = (" " + " · ".join(id_bits) + ".") if id_bits else ""
++                st.success(f"✅ Patient enrolled.{id_label} Status: 🔴 Pending doctor recommendation.")
+                 st.info("Add the lab & doctor-recommendation details later from **View Records → Update DR**.")
+             else:
+                 st.info("Enrol this patient to save the record. Doctor Recommendation & Laboratory "
+@@ -599,12 +607,15 @@ def main():
+                             )
+                             if report_id:
+                                 st.session_state['saved_id'] = report_id
+-                                # Surface the auto-assigned sequential Patient ID (P001, ...).
++                                # Surface the auto-assigned IDs: hospital-based Study ID
++                                # (M01/T01) and the internal sequential Record ID (P001).
+                                 try:
+                                     rec = get_record(report_id)
+                                     st.session_state['saved_patient_id'] = rec.get('patient_id') if rec else None
++                                    st.session_state['saved_study_id'] = rec.get('patient_study_id') if rec else None
+                                 except Exception:
+                                     st.session_state['saved_patient_id'] = None
++                                    st.session_state['saved_study_id'] = None
+                                 st.rerun()
+                             else:
+                                 st.error("❌ Failed to enrol patient. Please try again.")
+diff --git a/dashboard.py b/dashboard.py
+index 3b7263d..1d787f0 100644
+--- a/dashboard.py
++++ b/dashboard.py
+@@ -241,13 +241,14 @@ def _render_records_workspace(records):
+         st.session_state['vr_sig'] = signature
+         st.session_state['vr_page'] = 1
+ 
+-    # download CSV of the current filtered view
++    # download CSV of the whole current filtered view ("Select All" / Download All)
+     if filtered:
+-        csv_bytes = _build_grid_df(filtered, 0).to_csv(index=False).encode('utf-8')
++        csv_bytes = _build_export_df(filtered).to_csv(index=False).encode('utf-8')
+         sc3.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+-        sc3.download_button("⬇️ Download CSV", data=csv_bytes,
+-                            file_name=f"patient_records_{datetime.now().strftime('%Y%m%d')}.csv",
+-                            mime="text/csv", use_container_width=True, key="vr_csv")
++        sc3.download_button("⬇️ Download All", data=csv_bytes,
++                            file_name=f"patient_records_all_{datetime.now().strftime('%Y%m%d')}.csv",
++                            mime="text/csv", use_container_width=True, key="vr_csv",
++                            help="Download every patient in the current filter (Select All).")
+ 
+     if not filtered:
+         st.info("No records match the current filters. Try clearing the search or filters.")
+@@ -266,7 +267,7 @@ def _render_records_workspace(records):
+     grid_df = _build_grid_df(page_recs, start)
+     event = st.dataframe(
+         grid_df, use_container_width=True, hide_index=True, height=560,
+-        on_select="rerun", selection_mode="single-row", key=f"vr_grid_p{page}",
++        on_select="rerun", selection_mode="multi-row", key=f"vr_grid_p{page}",
+         column_config={
+             "#": st.column_config.NumberColumn("#", width="small"),
+             "Status": st.column_config.TextColumn("Status", width="small"),
+@@ -276,7 +277,7 @@ def _render_records_workspace(records):
+ 
+     _render_pager(page, pages, total_f, start, len(page_recs))
+ 
+-    # --- action bar for the selected row ---------------------------------
++    # --- selection: drive per-patient actions and selected-CSV download ---
+     selected_rows = []
+     sel = getattr(event, "selection", None)
+     if sel is not None:
+@@ -284,13 +285,25 @@ def _render_records_workspace(records):
+         if selected_rows is None and isinstance(sel, dict):
+             selected_rows = sel.get("rows", [])
+     selected_rows = selected_rows or []
+-
+-    if selected_rows:
++    selected_recs = [page_recs[i] for i in selected_rows if 0 <= i < len(page_recs)]
++
++    if len(selected_recs) > 1:
++        # Multiple patients selected -> download just those.
++        sel_csv = _build_export_df(selected_recs).to_csv(index=False).encode('utf-8')
++        st.download_button(
++            f"⬇️ Download Selected ({len(selected_recs)})", data=sel_csv,
++            file_name=f"patient_records_selected_{datetime.now().strftime('%Y%m%d')}.csv",
++            mime="text/csv", key="vr_csv_selected")
++        st.caption(f"✅ {len(selected_recs)} patients selected. Select a single row to "
++                   "View / Edit / Update DR / Delete / Download one patient.")
++    elif len(selected_recs) == 1:
++        # Single patient -> full action bar (includes a per-patient CSV download).
+         idx = selected_rows[0]
+         if 0 <= idx < len(page_ids):
+             _render_action_bar(page_recs[idx], page_ids[idx])
+     else:
+-        st.caption("👆 Select a row above to act on that patient.")
++        st.caption("👆 Select one row to act on a patient, or tick multiple rows to "
++                   "download a subset. Use **Download All** for everyone.")
+ 
+ 
+ def _apply_filters(records, status, search, sel_hosp, sel_dept, use_date, date_from, date_to):
+@@ -352,6 +365,47 @@ def _build_grid_df(recs, start_index):
+     ])
+ 
+ 
++def _build_export_df(recs):
++    """CSV-export rows (one row per patient): patient/administrative fields plus
++    the Top 5 predicted viruses with their probabilities. The Top 5 values are
++    already stored on each record (top_1_virus/top_1_confidence ... top_5_*),
++    so this only formats existing data — no recompute, no model access."""
++    rows = []
++    for i, r in enumerate(recs, start=1):
++        row = {
++            "#": i,
++            "Patient ID No.": _identifier(r),
++            "Patient Study ID": r.get('patient_study_id') or "—",
++            "Patient Name": _patient_name(r) or "—",
++            "MRD ID": r.get('patient_mrd_id') or "—",
++            "Age": r.get('age') if r.get('age') not in (None, "") else "—",
++            "Sex": r.get('sex') or "—",
++            "Hospital": r.get('hospital') or "—",
++            "Department": r.get('department') or "—",
++            "Date of Collection": r.get('date_of_collection') or "—",
++            "Date of Admission": r.get('date_of_admission') or "—",
++            "Predicted Virus": r.get('predicted_virus_name') or "—",
++            "Status": "Completed" if _is_completed(r) else "Pending",
++        }
++        # Top 5 predictions, ranked, with probability percentages.
++        for n in range(1, 6):
++            conf = r.get(f'top_{n}_confidence')
++            try:
++                conf_str = f"{float(conf):.2f}" if conf not in (None, "") else "—"
++            except (TypeError, ValueError):
++                conf_str = "—"
++            row[f"Top {n} Virus"] = r.get(f'top_{n}_virus') or "—"
++            row[f"Top {n} Probability (%)"] = conf_str
++        rows.append(row)
++
++    cols = ["#", "Patient ID No.", "Patient Study ID", "Patient Name", "MRD ID",
++            "Age", "Sex", "Hospital", "Department",
++            "Date of Collection", "Date of Admission", "Predicted Virus", "Status"]
++    for n in range(1, 6):
++        cols += [f"Top {n} Virus", f"Top {n} Probability (%)"]
++    return pd.DataFrame(rows, columns=cols)
++
++
+ def _render_pager(page, pages, total_f, start, page_count):
+     c1, c2, c3 = st.columns([1, 2, 1])
+     c1.button("⬅️ Prev", disabled=(page <= 1), use_container_width=True,
+@@ -370,7 +424,7 @@ def _render_action_bar(rec, rid):
+     st.markdown("---")
+     badge = "🟢 Completed" if _is_completed(rec) else "🔴 Pending"
+     st.markdown(f"**Selected patient:** `{_identifier(rec)}`  ·  Status: {badge}")
+-    b1, b2, b3, b4 = st.columns(4)
++    b1, b2, b3, b4, b5 = st.columns(5)
+     b1.button("👁️ View", use_container_width=True, on_click=_open_action,
+               args=("view", rid), key=f"act_view_{rid}")
+     b2.button("✏️ Edit", use_container_width=True, on_click=_open_action,
+@@ -379,6 +433,10 @@ def _render_action_bar(rec, rid):
+               args=("updatedr", rid), key=f"act_dr_{rid}")
+     b4.button("🗑️ Delete", use_container_width=True, on_click=_open_action,
+               args=("delete", rid), key=f"act_del_{rid}")
++    patient_csv = _build_export_df([rec]).to_csv(index=False).encode('utf-8')
++    b5.download_button("⬇️ CSV", data=patient_csv,
++                       file_name=f"patient_{_identifier(rec)}_{datetime.now().strftime('%Y%m%d')}.csv",
++                       mime="text/csv", use_container_width=True, key=f"act_csv_{rid}")
+ 
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/data_handler.py b/data_handler.py
+index 793dd8d..50238d7 100644
+--- a/data_handler.py
++++ b/data_handler.py
+@@ -57,7 +57,44 @@ class DataHandler:
+             # Fallback to timestamp-based ID
+             import time
+             return f"P{int(time.time())}"
+-    
++
++    def _hospital_prefix(self, hospital: str) -> str:
++        """Map a hospital to its Study ID prefix (MMC -> M, TMC -> T).
++        Hospitals not in the map fall back to their first alphabetic character.
++        Extend this map if two hospitals would otherwise share a first letter."""
++        prefixes = {'MMC': 'M', 'TMC': 'T'}
++        if not hospital or hospital == 'Select...':
++            return ''
++        if hospital in prefixes:
++            return prefixes[hospital]
++        for ch in hospital:
++            if ch.isalpha():
++                return ch.upper()
++        return ''
++
++    def _get_next_study_id(self, hospital: str) -> str:
++        """Generate a hospital-based Patient Study ID (MMC -> M01, TMC -> T01, ...).
++        Each hospital uses its own atomic counter so numbers increment
++        independently and never collide. Returns '' if no valid hospital."""
++        try:
++            if self.db is None:
++                return ''
++            prefix = self._hospital_prefix(hospital)
++            if not prefix:
++                return ''
++            counters = self.db['counters']
++            result = counters.find_one_and_update(
++                {'_id': f'study_id_{prefix}'},
++                {'$inc': {'sequence_value': 1}},
++                upsert=True,
++                return_document=True
++            )
++            sequence_num = result.get('sequence_value', 1)
++            return f"{prefix}{sequence_num:02d}"
++        except Exception as e:
++            logger.error(f"Error generating study ID for hospital '{hospital}': {e}")
++            return ''
++
+     def _create_indexes(self):
+         """Create database indexes for better performance"""
+         try:
+@@ -122,14 +159,16 @@ class DataHandler:
+             
+             # Generate unique patient ID
+             patient_id = self._get_next_patient_id()
+-            
++            # Generate hospital-based Patient Study ID (MMC -> M01, TMC -> T01, ...).
++            study_id = self._get_next_study_id(patient_data.get('hospital', ''))
++
+             # Transform patient data to human-readable format
+             readable_patient_info = {
+                 'patient_id': patient_id,
+                 'patient_name': patient_data.get('patient_name', ''),
+                 # Keep core patient administrative fields first (matching app input order)
+                 'date_of_collection': patient_data.get('date_of_collection', ''),
+-                'patient_study_id': patient_data.get('patient_study_id', ''),
++                'patient_study_id': study_id or patient_data.get('patient_study_id', ''),
+                 'patient_mrd_id': patient_data.get('patient_mrd_id', ''),
+                 'hospital': patient_data.get('hospital', ''),
+                 'department': patient_data.get('department', ''),
+-- 
+2.43.0
+
