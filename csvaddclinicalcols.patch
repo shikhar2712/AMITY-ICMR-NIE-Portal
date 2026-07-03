@@ -1,0 +1,42 @@
+From f9f099cf914f33e01e8d57d8fb2b9a9fa830ef48 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 24 Jun 2026 11:34:31 +0000
+Subject: [PATCH] CSV export: add Age, Sex, Patient Type, Onset & Duration of
+ Illness columns
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014HDPmuGuqSWsHPmkq6rViq
+---
+ dashboard.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/dashboard.py b/dashboard.py
+index 482c7e7..21d8628 100644
+--- a/dashboard.py
++++ b/dashboard.py
+@@ -383,6 +383,12 @@ def _build_export_df(recs):
+             "Address": r.get('address') or "—",
+             "Mobile No": r.get('mobile_no') or "—",
+             "Lab ID": r.get('lab_id') or "",
++            "Age": r.get('age') if r.get('age') not in (None, "") else "—",
++            "Sex": r.get('sex') or "—",
++            "Patient Type": r.get('patient_type') or "—",
++            "Onset of Illness": r.get('onset_of_illness') or "—",
++            "Duration of Illness (days)": r.get('duration_of_illness_days')
++                if r.get('duration_of_illness_days') not in (None, "") else "—",
+         }
+         # Top 5 predictions, ranked, with probability percentages.
+         for n in range(1, 6):
+@@ -396,7 +402,8 @@ def _build_export_df(recs):
+         rows.append(row)
+ 
+     cols = ["Date of Collection", "Patient MRD ID", "Hospital", "Patient Study ID",
+-            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No", "Lab ID"]
++            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No", "Lab ID",
++            "Age", "Sex", "Patient Type", "Onset of Illness", "Duration of Illness (days)"]
+     for n in range(1, 6):
+         cols += [f"Top {n} Virus", f"Top {n} Probability (%)"]
+     return pd.DataFrame(rows, columns=cols)
+-- 
+2.43.0
+

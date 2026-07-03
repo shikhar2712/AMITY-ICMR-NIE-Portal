@@ -1,0 +1,127 @@
+From 0476edd83cba9785d5e4ab295327825a86f7d1e4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 24 Jun 2026 10:01:47 +0000
+Subject: [PATCH] ICMR: simplify Update DR to Lab ID only; reorder CSV columns
+ to ICMR spec
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Update DR form now shows only the Lab ID field (removes Doctor Recommended,
+  Test Performed, Sample Type, Diagnostic Method, Lab Results, Confirmed
+  Pathogen, Date of Report, Date of Sample Collection).
+- CSV export columns reordered to ICMR sequence: Date of Collection,
+  Patient MRD ID, Hospital, Patient Study ID, Department, Date of Admission,
+  Patient Name, Address, Mobile No, then Top 1–5 Virus + Probability.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014HDPmuGuqSWsHPmkq6rViq
+---
+ dashboard.py | 61 +++++++++++-----------------------------------------
+ 1 file changed, 12 insertions(+), 49 deletions(-)
+
+diff --git a/dashboard.py b/dashboard.py
+index 1d787f0..c38e816 100644
+--- a/dashboard.py
++++ b/dashboard.py
+@@ -366,26 +366,22 @@ def _build_grid_df(recs, start_index):
+ 
+ 
+ def _build_export_df(recs):
+-    """CSV-export rows (one row per patient): patient/administrative fields plus
++    """CSV-export rows (one row per patient): ICMR-specified column order plus
+     the Top 5 predicted viruses with their probabilities. The Top 5 values are
+     already stored on each record (top_1_virus/top_1_confidence ... top_5_*),
+     so this only formats existing data — no recompute, no model access."""
+     rows = []
+-    for i, r in enumerate(recs, start=1):
++    for r in recs:
+         row = {
+-            "#": i,
+-            "Patient ID No.": _identifier(r),
+-            "Patient Study ID": r.get('patient_study_id') or "—",
+-            "Patient Name": _patient_name(r) or "—",
+-            "MRD ID": r.get('patient_mrd_id') or "—",
+-            "Age": r.get('age') if r.get('age') not in (None, "") else "—",
+-            "Sex": r.get('sex') or "—",
++            "Date of Collection": r.get('date_of_collection') or "—",
++            "Patient MRD ID": r.get('patient_mrd_id') or "—",
+             "Hospital": r.get('hospital') or "—",
++            "Patient Study ID": r.get('patient_study_id') or "—",
+             "Department": r.get('department') or "—",
+-            "Date of Collection": r.get('date_of_collection') or "—",
+             "Date of Admission": r.get('date_of_admission') or "—",
+-            "Predicted Virus": r.get('predicted_virus_name') or "—",
+-            "Status": "Completed" if _is_completed(r) else "Pending",
++            "Patient Name": _patient_name(r) or "—",
++            "Address": r.get('address') or "—",
++            "Mobile No": r.get('mobile_no') or "—",
+         }
+         # Top 5 predictions, ranked, with probability percentages.
+         for n in range(1, 6):
+@@ -398,9 +394,8 @@ def _build_export_df(recs):
+             row[f"Top {n} Probability (%)"] = conf_str
+         rows.append(row)
+ 
+-    cols = ["#", "Patient ID No.", "Patient Study ID", "Patient Name", "MRD ID",
+-            "Age", "Sex", "Hospital", "Department",
+-            "Date of Collection", "Date of Admission", "Predicted Virus", "Status"]
++    cols = ["Date of Collection", "Patient MRD ID", "Hospital", "Patient Study ID",
++            "Department", "Date of Admission", "Patient Name", "Address", "Mobile No"]
+     for n in range(1, 6):
+         cols += [f"Top {n} Virus", f"Top {n} Probability (%)"]
+     return pd.DataFrame(rows, columns=cols)
+@@ -559,48 +554,16 @@ def _render_edit_form(rec):
+ 
+ def _render_update_dr_form(rec):
+     st.subheader(f"🩺 Update Doctor Recommendation — Patient {_identifier(rec)}")
+-    all_opts = _virus_options()          # model-derived (Test Performed)
+-    lab_opts = [""] + all_opts
+-    dr_opts = DR_SUSPECTED_PATHOGENS      # ICMR list (Suspected + Confirmed pathogens)
+-
+-    def _keep(values, allowed):
+-        return [x for x in values if x in allowed] if isinstance(values, list) else []
+-
+-    res_opts = ["", "Positive", "Negative"]
+     with st.form(key=f"dr_form_{rec['_id']}"):
+-        doctor_recommended = st.multiselect(
+-            "Doctor Recommended - Suspected Pathogens (up to 5)", options=dr_opts,
+-            default=_keep(rec.get('doctor_recommended_viruses'), dr_opts))
+-        c1, c2 = st.columns(2)
+-        with c1:
+-            lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
+-            test_performed = st.multiselect("Test Performed", options=lab_opts,
+-                                            default=_keep(rec.get('test_performed'), lab_opts))
+-            sample_type = st.text_input("Sample Type", value=rec.get('sample_type') or "")
+-            date_sample = st.text_input("Date of Sample Collection (DD-MM-YYYY)",
+-                                        value=rec.get('date_of_sample_collection') or "")
+-        with c2:
+-            diagnostic_method = st.text_input("Diagnostic Method", value=rec.get('diagnostic_method') or "")
+-            lab_results = st.selectbox("Laboratory Results", options=res_opts,
+-                                       index=res_opts.index(rec['laboratory_results'])
+-                                       if rec.get('laboratory_results') in res_opts else 0)
+-            confirmed = st.multiselect("Confirmed Pathogen", options=dr_opts,
+-                                       default=_keep(rec.get('confirmed_pathogen'), dr_opts))
+-            date_report = st.text_input("Date of Report (DD-MM-YYYY)", value=rec.get('date_of_report') or "")
++        lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
+ 
+         if st.form_submit_button("💾 Save Doctor Recommendation", type="primary", use_container_width=True):
+             if not lab_id.strip():
+                 st.warning("⚠️ Lab ID is required to complete this case. It stays 🔴 Pending until a Lab ID is entered.")
+-            elif len(doctor_recommended) > 5:
+-                st.warning("⚠️ Please select at most 5 suspected pathogens.")
+             else:
+                 payload = {
+                     'prediction_id': rec['_id'],
+-                    'doctor_recommended_viruses': doctor_recommended,
+-                    'lab_id': lab_id.strip(), 'test_performed': test_performed,
+-                    'date_of_sample_collection': date_sample.strip(), 'sample_type': sample_type.strip(),
+-                    'diagnostic_method': diagnostic_method.strip(), 'laboratory_results': lab_results,
+-                    'confirmed_pathogen': confirmed, 'date_of_report': date_report.strip(),
++                    'lab_id': lab_id.strip(),
+                 }
+                 if save_doctor_lab_data_to_db(payload):
+                     _flash("✅ Doctor recommendation saved — case marked completed.")
+-- 
+2.43.0
+

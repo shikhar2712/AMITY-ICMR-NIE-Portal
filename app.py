@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -117,6 +118,120 @@ def widget_key(name: str) -> str:
     return f"{name}_{st.session_state.get('prediction_reset_version', 0)}"
 
 def main():
+    # --- Floating Home icon: lives in document.body, immune to sidebar anim -
+    # Streamlit applies a CSS transform to the sidebar/content area while it
+    # slides open/closed. Any element with position:fixed nested inside a
+    # transformed ancestor stops being fixed to the *viewport* and becomes
+    # fixed to that ancestor instead - which is why the icon disappeared with
+    # the sidebar. Fix: keep the real st.button (needed for the Python click
+    # callback) but hide it off-screen, and inject a completely separate
+    # visible icon directly into <body> - outside any Streamlit-managed
+    # element - that simply .click()'s the real hidden button when pressed.
+    st.markdown(
+        """
+        <style>
+        /* Real Streamlit button: kept functional, not visible anywhere */
+        .st-key-home_icon_container {
+            position: absolute !important;
+            left: -9999px !important;
+            top: -9999px !important;
+            width: 1px !important;
+            height: 1px !important;
+            overflow: hidden !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="home_icon_container"):
+        if st.button("🏠", key="home_icon_btn", help="Back to Home"):
+            st.session_state['navigation_page'] = 'Home'
+            st.session_state['_scroll_to_page'] = True
+            st.rerun()
+
+    components.html(
+        """
+        <script>
+        (function() {
+            function findArrow(doc) {
+                return doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
+                    || doc.querySelector('[data-testid="stSidebarCollapseButton"]')
+                    || doc.querySelector('[data-testid="collapsedControl"]');
+            }
+
+            function ensureIcon(doc) {
+                let icon = doc.getElementById('custom-home-icon');
+                if (icon) return icon;
+                icon = doc.createElement('button');
+                icon.id = 'custom-home-icon';
+                icon.type = 'button';
+                icon.innerHTML = '🏠';
+                icon.title = 'Back to Home';
+                Object.assign(icon.style, {
+                    position: 'fixed',
+                    top: '14px',
+                    left: '60px',
+                    zIndex: '999999',
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: '#ffffff',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0',
+                    transition: 'left 0.15s ease, top 0.15s ease, transform 0.15s ease',
+                });
+                icon.onmouseenter = function () { icon.style.transform = 'scale(1.08)'; };
+                icon.onmouseleave = function () { icon.style.transform = 'scale(1)'; };
+                icon.onclick = function () {
+                    const realBtn = doc.querySelector('.st-key-home_icon_container button');
+                    if (realBtn) { realBtn.click(); }
+                };
+                doc.body.appendChild(icon);
+                return icon;
+            }
+
+            function positionHomeIcon() {
+                try {
+                    const doc = window.parent.document;
+                    const icon = ensureIcon(doc);
+                    const arrow = findArrow(doc);
+                    if (arrow) {
+                        const rect = arrow.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            icon.style.top = rect.top + 'px';
+                            icon.style.left = (rect.right + 10) + 'px';
+                            return;
+                        }
+                    }
+                    // Arrow not found (older/newer Streamlit build) - safe fallback.
+                    icon.style.top = '14px';
+                    icon.style.left = '60px';
+                } catch (e) { /* cross-origin or timing issue - retry will fix it */ }
+            }
+
+            positionHomeIcon();
+            [50, 150, 300, 600, 1200].forEach(function (ms) {
+                setTimeout(positionHomeIcon, ms);
+            });
+            try {
+                const obs = new MutationObserver(positionHomeIcon);
+                obs.observe(window.parent.document.body, {
+                    attributes: true, childList: true, subtree: true,
+                });
+                window.parent.addEventListener('resize', positionHomeIcon);
+            } catch (e) { /* ignore */ }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
     # Top logos
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
@@ -134,10 +249,67 @@ def main():
             st.image("logo_2.jpeg", width=250)
         except:
             st.write("")  # Skip if image not found
-    
-    # Sidebar navigation
+
+    # --- Sidebar navigation: clickable buttons, no radio circles -----------
+    # Adjustable positioning for the nav title + buttons. Edit the values
+    # below to move things - see the comment on each line for what it does.
+    st.markdown(
+        """
+        <style>
+        /* "Navigation" title: margin-top/bottom = space above/below it */
+        section[data-testid="stSidebar"] h1 {
+            margin-top: -77px;      /* + moves title down, - moves it up */
+            margin-bottom: 121px;   /* space between title and first button */
+        }
+        /* Each nav button (Dashboard / Prediction / View Records / About) */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+            justify-content: center;  /* text align: flex-start=left, center=center, flex-end=right */
+            padding-left: 16px;           /* + moves text further right, 0 = flush left */
+            margin-top: 2px;              /* space above each button (vertical spacing) */
+            margin-bottom: 2px;           /* space below each button (vertical spacing) */
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to:", ["Home", "Prediction", "Dashboard", "View Records", "About"], key='navigation_page')
+    NAV_ITEMS = [
+        ("Dashboard", "Dashboard"),
+        ("Prediction/Test Recommendation", "Prediction"),
+        ("View Records", "View Records"),
+        ("About", "About"),
+    ]
+    if 'navigation_page' not in st.session_state:
+        st.session_state['navigation_page'] = 'Home'
+
+    for label, page_key in NAV_ITEMS:
+        is_active = st.session_state['navigation_page'] == page_key
+        if st.sidebar.button(
+            label, key=f"nav_btn_{page_key}", use_container_width=True,
+            type="primary" if is_active else "secondary",
+        ):
+            st.session_state['navigation_page'] = page_key
+            st.session_state['_scroll_to_page'] = True
+            st.rerun()
+
+    page = st.session_state['navigation_page']
+
+    # Anchor at the very top of whichever page is showing; jumping here on
+    # every navigation (including Home) is what makes each section land at
+    # the top of the viewport instead of wherever the user was scrolled to.
+    st.markdown("<div id='page-content-anchor'></div>", unsafe_allow_html=True)
+    if st.session_state.pop('_scroll_to_page', False):
+        components.html(
+            """
+            <script>
+                const target = window.parent.document.getElementById('page-content-anchor');
+                if (target) {
+                    target.scrollIntoView({behavior: 'smooth', block: 'start'});
+                }
+            </script>
+            """,
+            height=0,
+        )
 
     if page == "Home":
         st.markdown(
@@ -159,7 +331,7 @@ def main():
         - **Geo-temporal Intelligence**: Incorporates seasonal patterns and geographical factors
         - **Real-time Predictions**: Instant probability scores and confidence metrics
         
-        Navigate to the **Prediction** page using the sidebar to input patient details 
+        Navigate to the **Prediction/Test Recommendation** page using the sidebar to input patient details
         and get comprehensive virus classification results.
         """)
         st.warning("**Medical Disclaimer**: This system is designed to assist healthcare professionals and should not be used as a substitute for professional medical diagnosis, treatment, or advice. Always consult qualified medical personnel for patient care decisions.")
@@ -238,14 +410,11 @@ def main():
         # 6) Date of Admission, 7) Patient Name, 8) Address, 9) Mobile No.
         # Dates formatted as DD-MM-YYYY to match the requested format.
         patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
+        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
         patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
         # Only two study-site options as requested. "Select..." is the default so the
         # user must actively choose (validated before prediction).
         patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["Select...", "MMC", "TMC"], index=0, key=widget_key('hospital'))
-        # Patient Study ID is auto-assigned from the Hospital on enrolment
-        # (MMC -> M01, TMC -> T01, ...). Shown read-only here; the assigned value
-        # is surfaced after enrolment, like the internal Patient ID.
-        st.sidebar.text_input("Patient Study ID (Auto-generated)", value="Auto-assigned on enrolment (based on Hospital)", disabled=True, key=widget_key('patient_study_id'))
         patient_data['department'] = st.sidebar.selectbox("Department", options=["Select...", "Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
         if patient_data['department'] == "Other":
             patient_data['department_other_specification'] = st.sidebar.text_input(
@@ -256,7 +425,8 @@ def main():
             patient_data['department_other_specification'] = ""
         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
-        patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
+        # Patient ID is auto-assigned (P001, P002, ...) by the database on enrolment.
+        st.sidebar.text_input("Patient ID No.", value="Auto-assigned on enrolment", disabled=True, key=widget_key('patient_id_no'))
 
         # Address & Location expander - reveals State, District, Subdistrict, Pin Code and Address line
         with st.sidebar.expander("Address & Location (expand)", expanded=False):
@@ -399,6 +569,7 @@ def main():
                         y_pred_proba = prediction_results['y_pred_proba']
                         top_5_indices = prediction_results['top_5_indices']
                         second_model_results = prediction_results['second_model_results']
+                        excluded_by_syndrome = prediction_results.get('excluded_by_syndrome', [])
 
                         # Save prediction results to session state.
                         # Database insert is intentionally deferred until user clicks "Save the Report".
@@ -469,7 +640,12 @@ def main():
                                 )
 
                         with col2:
-                            st.subheader("Top 5 Predictions")
+                            st.subheader(f"Top {len(top_5_indices)} Predictions")
+                            if excluded_by_syndrome:
+                                st.caption(
+                                    f"ℹ️ Not shown — inconsistent with **{patient_data.get('syndrome_name', 'the selected syndrome')}**: "
+                                    f"{', '.join(excluded_by_syndrome)}"
+                                )
                             for rank, idx in enumerate(top_5_indices, 1):
                                 virus_name = VIRUS_MAPPING[idx]
                                 confidence = y_pred_proba[idx] * 100
@@ -486,6 +662,12 @@ def main():
                             st.markdown("---")
                             st.subheader("Other Viruses Sub-Classification")
                             # st.info("Since 'Other_Viruses' appeared in top 5, secondary classification was performed.")
+                            sub_excluded = second_model_results.get('excluded_by_syndrome', [])
+                            if sub_excluded:
+                                st.caption(
+                                    f"ℹ️ Not shown — inconsistent with **{patient_data.get('syndrome_name', 'the selected syndrome')}**: "
+                                    f"{', '.join(sub_excluded)}"
+                                )
 
                             col3, col4 = st.columns([1, 1])
 
@@ -496,7 +678,7 @@ def main():
                                 st.metric(label="Sub-Category", value=top_sub, delta=f"{top_conf:.2f}% confidence")
 
                             with col4:
-                                st.write("**Top 5 Sub-Categories:**")
+                                st.write(f"**Top {len(second_model_results['top_5'])} Sub-Categories:**")
                                 for rank, idx in enumerate(second_model_results['top_5'], 1):
                                     sub_virus = OTHER_VIRUS_MAPPING[idx]
                                     sub_confidence = second_model_results['probabilities'][idx] * 100
@@ -564,14 +746,8 @@ def main():
             saved_id = st.session_state.get('saved_id')
             if saved_id:
                 enrolled_pid = st.session_state.get('saved_patient_id')
-                enrolled_sid = st.session_state.get('saved_study_id')
-                id_bits = []
-                if enrolled_sid:
-                    id_bits.append(f"Study ID: **{enrolled_sid}**")
-                if enrolled_pid:
-                    id_bits.append(f"Record ID: **{enrolled_pid}**")
-                id_label = (" " + " · ".join(id_bits) + ".") if id_bits else ""
-                st.success(f"✅ Patient enrolled.{id_label} Status: 🔴 Pending doctor recommendation.")
+                pid_label = f" Patient ID: **{enrolled_pid}**." if enrolled_pid else ""
+                st.success(f"✅ Patient enrolled.{pid_label} Status: 🔴 Pending doctor recommendation.")
                 st.info("Add the lab & doctor-recommendation details later from **View Records → Update DR**.")
             else:
                 st.info("Enrol this patient to save the record. Doctor Recommendation & Laboratory "
@@ -607,15 +783,12 @@ def main():
                             )
                             if report_id:
                                 st.session_state['saved_id'] = report_id
-                                # Surface the auto-assigned IDs: hospital-based Study ID
-                                # (M01/T01) and the internal sequential Record ID (P001).
+                                # Surface the auto-assigned sequential Patient ID (P001, ...).
                                 try:
                                     rec = get_record(report_id)
                                     st.session_state['saved_patient_id'] = rec.get('patient_id') if rec else None
-                                    st.session_state['saved_study_id'] = rec.get('patient_study_id') if rec else None
                                 except Exception:
                                     st.session_state['saved_patient_id'] = None
-                                    st.session_state['saved_study_id'] = None
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to enrol patient. Please try again.")

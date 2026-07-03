@@ -212,6 +212,152 @@ ALL_SYMPTOMS = [
 
 
 # ============================================================================
+# SYNDROME -> EXCLUDED VIRUS RULES
+# ============================================================================
+# Source: the "Syndrome / Viruses That Should Not Be Present" clinical
+# reference table. For a given syndrome, any virus listed here is considered
+# clinically implausible and is removed from that syndrome's predictions
+# before the top-N ranking is built — the next-highest-confidence,
+# syndrome-consistent prediction moves up to take its place.
+#
+# Keyed by Syndrome_encoded (0-8, matches DEFAULT_SYNDROME_MAPPING and the
+# 'Syndrome_encoded' / 'syndrome' fields in patient_data). Names are matched
+# case-insensitively against VIRUS_MAPPING / OTHER_VIRUS_MAPPING after
+# passing through VIRUS_NAME_ALIASES, so this table doesn't need to track
+# every spelling variant used elsewhere in the codebase. Names with no match
+# in either mapping (e.g. "HIV", "Haemophilus influenzae", "Toxoplasma",
+# "Unknown" — not classes either model can predict) are harmless no-ops; kept
+# here so this table mirrors the source reference table exactly.
+SYNDROME_EXCLUDED_VIRUSES = {
+    0: {  # ARI/Influenza Like Illness (ILI)
+        'Dengue Virus', 'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis B Virus', 'Hepatitis C Virus', 'Hepatitis E Virus',
+        'Herpes Simplex Virus (HSV)', 'Human papillomavirus (HPV)',
+        'Japanese Encephalitis', 'Kyasanur Forest Disease', 'Leptospira',
+        'Norovirus', 'Rotavirus', 'Rubella',
+        'Scrub typhus (Orientia tsutsugamushi)', 'Toxoplasma', 'Unknown',
+        'West Nile virus (WNV)',
+    },
+    1: {  # Acute Diarrheal Disease
+        'HIV', 'Haemophilus influenzae', 'Hepatitis B Virus',
+        'Hepatitis C Virus', 'Herpes Simplex Virus (HSV)',
+        'Human papillomavirus (HPV)', 'Japanese Encephalitis',
+        'Kyasanur Forest Disease', 'Mumps Virus', 'Parvovirus', 'Rubella',
+        'Toxoplasma', 'Varicella zoster virus (VZV)', 'West Nile virus (WNV)',
+    },
+    2: {  # Acute Encephalitis Syndrome (AES)
+        'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis B Virus', 'Hepatitis C Virus', 'Hepatitis E Virus',
+        'Human papillomavirus (HPV)', 'Influenza A H1N1', 'Influenza A H3N2',
+        'Influenza B Victoria', 'Metapneumovirus', 'Norovirus',
+        'Other Influenza', 'Respiratory Adenovirus',
+        'Respiratory Syncytial Virus (RSV)', 'Rhinovirus', 'Toxoplasma',
+    },
+    3: {  # Conjunctivitis
+        'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis B Virus', 'Hepatitis C Virus', 'Leptospira', 'Mumps Virus',
+        'Respiratory Syncytial Virus (RSV)',
+        'Scrub typhus (Orientia tsutsugamushi)', 'Toxoplasma',
+    },
+    4: {  # Fever with Rash
+        'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis B Virus', 'Hepatitis C Virus', 'Hepatitis E Virus',
+        'Influenza A H1N1', 'Influenza A H3N2', 'Influenza B Victoria',
+        'Respiratory Syncytial Virus (RSV)', 'Rotavirus', 'SARS-Cov-2',
+        'Toxoplasma',
+    },
+    5: {  # Hemorrhagic fever
+        'Enterovirus', 'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis E Virus', 'Herpes Simplex Virus (HSV)', 'Measles Virus',
+        'Mumps Virus', 'Norovirus', 'Parvovirus', 'Respiratory Adenovirus',
+        'Respiratory Syncytial Virus (RSV)', 'Rubella', 'Toxoplasma',
+    },
+    6: {  # Jaundice of < 4 weeks
+        'Chikungunya Virus', 'Enterovirus', 'HIV', 'Haemophilus influenzae',
+        'Human papillomavirus (HPV)', 'Influenza A H1N1', 'Influenza A H3N2',
+        'Influenza B Victoria', 'Measles Virus', 'Mumps Virus', 'Parvovirus',
+        'Respiratory Adenovirus', 'Respiratory Syncytial Virus (RSV)',
+        'Rhinovirus', 'Rotavirus', 'Rubella', 'Toxoplasma',
+    },
+    7: {  # Only Fever < 7 days
+        'HIV', 'Haemophilus influenzae', 'Toxoplasma',
+    },
+    8: {  # Severe Acute Respiratory Infection (SARI)
+        'Dengue Virus', 'HIV', 'Haemophilus influenzae', 'Hepatitis A Virus',
+        'Hepatitis B Virus', 'Hepatitis C Virus', 'Hepatitis E Virus',
+        'Herpes Simplex Virus (HSV)', 'Human papillomavirus (HPV)',
+        'Japanese Encephalitis', 'Kyasanur Forest Disease', 'Leptospira',
+        'Norovirus', 'Other Influenza', 'Rotavirus', 'Rubella',
+        'Scrub typhus (Orientia tsutsugamushi)', 'Toxoplasma',
+        'West Nile virus (WNV)',
+    },
+}
+
+# A couple of reference-table entries use different wording than the model's
+# own class names (e.g. the table says "Respiratory Adenovirus", but
+# DEFAULT_VIRUS_MAPPING's class 17 may load as plain "Adenovirus" from
+# encoding_major_VIRUS_NAME.csv). Both spellings are listed so matching is
+# correct regardless of which one is currently in VIRUS_MAPPING.
+VIRUS_NAME_ALIASES = {
+    'respiratory adenovirus': 'adenovirus',
+    'adenovirus': 'adenovirus',
+}
+
+
+def _normalize_virus_name(name):
+    """Lowercase + alias-normalize a virus name for exclusion-list matching."""
+    key = str(name).strip().lower()
+    return VIRUS_NAME_ALIASES.get(key, key)
+
+
+def _build_excluded_index_set(syndrome_encoded, virus_mapping):
+    """
+    Resolve a syndrome's excluded-virus names (SYNDROME_EXCLUDED_VIRUSES) to
+    the set of class indices in `virus_mapping` (VIRUS_MAPPING or
+    OTHER_VIRUS_MAPPING) that should not appear for that syndrome. Returns an
+    empty set if the syndrome is unrecognised or has no listed exclusions.
+    """
+    if syndrome_encoded is None:
+        return set()
+    try:
+        syndrome_key = int(syndrome_encoded)
+    except (TypeError, ValueError):
+        return set()
+    excluded_names = SYNDROME_EXCLUDED_VIRUSES.get(syndrome_key, set())
+    if not excluded_names:
+        return set()
+    excluded_normalized = {_normalize_virus_name(n) for n in excluded_names}
+    return {
+        idx for idx, name in virus_mapping.items()
+        if _normalize_virus_name(name) in excluded_normalized
+    }
+
+
+def _filter_topk(y_pred_proba, excluded_indices, k=5):
+    """
+    Rank all classes in y_pred_proba by probability (descending), drop any
+    class in `excluded_indices`, and return the top-k indices of what's left.
+
+    May return fewer than k indices if fewer than k syndrome-consistent
+    classes exist (this happens for a few syndrome / Other-Viruses-model
+    combinations, where most of the 8 sub-categories get excluded) — a virus
+    the reference table marks as "should not appear" is never padded back in
+    just to fill out a 5-item list.
+    """
+    full_ranking = np.argsort(y_pred_proba)[::-1]
+    if not excluded_indices:
+        return full_ranking[:k]
+    filtered = np.array(
+        [idx for idx in full_ranking if idx not in excluded_indices])
+    if filtered.size == 0:
+        # Every class excluded for this syndrome — shouldn't happen with the
+        # current reference table, but fail safe to the raw ranking rather
+        # than return an empty result.
+        return full_ranking[:k]
+    return filtered[:k]
+
+
+# ============================================================================
 # DEVICE DETECTION
 # ============================================================================
 
@@ -780,40 +926,54 @@ class VirusPredictor:
             raise RuntimeError("Models not loaded. Call load_models() first.")
         
         try:
+            # Drives the "should not appear" exclusion rules below.
+            syndrome_encoded = patient_data.get('Syndrome_encoded', patient_data.get('syndrome'))
+
             # Preprocess for Model 1
             xb1, xc1, xcat1 = self.preprocess_features(patient_data, self.preprocessing1)
-            
+
             # Model 1 prediction (26 major viruses)
             with torch.no_grad():
                 logits1 = self.model1(xb1, xc1, xcat1)  # Don't use return_embed for inference
                 y_pred_proba = torch.softmax(logits1, dim=1)[0].cpu().numpy()
-            
-            y_pred = np.argmax(y_pred_proba)
-            top_5_indices = np.argsort(y_pred_proba)[-5:][::-1]
-            
-            # Check if "Other Viruses" (class 15) is in top 5
+
+            # Re-rank the top-5 excluding viruses that shouldn't appear for
+            # this syndrome; the next-highest-confidence syndrome-consistent
+            # prediction moves up to take the place of anything excluded.
+            raw_top5 = np.argsort(y_pred_proba)[-5:][::-1]
+            excluded_m1 = _build_excluded_index_set(syndrome_encoded, VIRUS_MAPPING)
+            top_5_indices = _filter_topk(y_pred_proba, excluded_m1, k=5)
+            y_pred = top_5_indices[0]
+            excluded_from_view_m1 = [int(i) for i in raw_top5 if i in excluded_m1]
+
+            # Check if "Other Viruses" (class 15) is in the (post-filter) top 5
             second_model_results = None
             if 15 in top_5_indices:
                 xb2, xc2, xcat2 = self.preprocess_features(patient_data, self.preprocessing2)
-                
+
                 with torch.no_grad():
                     logits2 = self.model2(xb2, xc2, xcat2)  # Don't use return_embed for inference
                     y_pred_proba_m2 = torch.softmax(logits2, dim=1)[0].cpu().numpy()
-                
-                y_pred_m2 = np.argmax(y_pred_proba_m2)
-                top_5_indices_m2 = np.argsort(y_pred_proba_m2)[-5:][::-1]
-                
+
+                raw_top5_m2 = np.argsort(y_pred_proba_m2)[-5:][::-1]
+                excluded_m2 = _build_excluded_index_set(syndrome_encoded, OTHER_VIRUS_MAPPING)
+                top_5_indices_m2 = _filter_topk(y_pred_proba_m2, excluded_m2, k=5)
+                y_pred_m2 = top_5_indices_m2[0]
+                excluded_from_view_m2 = [int(i) for i in raw_top5_m2 if i in excluded_m2]
+
                 second_model_results = {
                     'prediction': y_pred_m2,
                     'probabilities': y_pred_proba_m2,
-                    'top_5': top_5_indices_m2
+                    'top_5': top_5_indices_m2,
+                    'excluded_by_syndrome': [OTHER_VIRUS_MAPPING[i] for i in excluded_from_view_m2],
                 }
-            
+
             return {
                 'y_pred': y_pred,
                 'y_pred_proba': y_pred_proba,
                 'top_5_indices': top_5_indices,
-                'second_model_results': second_model_results
+                'second_model_results': second_model_results,
+                'excluded_by_syndrome': [VIRUS_MAPPING[i] for i in excluded_from_view_m1],
             }
             
         except Exception as e:

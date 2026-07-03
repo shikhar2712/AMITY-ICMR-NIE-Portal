@@ -83,8 +83,11 @@ def _parse_ddmmyyyy(value):
 
 
 def _set_nav(page_name):
-    """Callback: switch the sidebar radio to another page (safe inside callbacks)."""
+    """Callback: switch to another page (safe inside callbacks) and trigger
+    the same smooth auto-scroll used by the sidebar nav buttons, so jumping
+    here via "New Case" etc. feels identical to clicking the sidebar."""
     st.session_state['navigation_page'] = page_name
+    st.session_state['_scroll_to_page'] = True
 
 
 def _open_action(action, record_id):
@@ -563,8 +566,16 @@ def _render_edit_form(rec):
 
 def _render_update_dr_form(rec):
     st.subheader(f"🩺 Update Doctor Recommendation — Patient {_identifier(rec)}")
+    pathogen_options = [""] + DR_SUSPECTED_PATHOGENS
+    current_pathogen = rec.get('confirmed_pathogen') or ""
+    default_idx = pathogen_options.index(current_pathogen) if current_pathogen in pathogen_options else 0
     with st.form(key=f"dr_form_{rec['_id']}"):
         lab_id = st.text_input("Lab ID (required to complete)", value=rec.get('lab_id') or "")
+        confirmed_pathogen = st.selectbox(
+            "Confirmed Pathogen",
+            options=pathogen_options,
+            index=default_idx,
+        )
 
         if st.form_submit_button("💾 Save Doctor Recommendation", type="primary", use_container_width=True):
             if not lab_id.strip():
@@ -573,6 +584,7 @@ def _render_update_dr_form(rec):
                 payload = {
                     'prediction_id': rec['_id'],
                     'lab_id': lab_id.strip(),
+                    'confirmed_pathogen': confirmed_pathogen,
                 }
                 if save_doctor_lab_data_to_db(payload):
                     _flash("✅ Doctor recommendation saved — case marked completed.")

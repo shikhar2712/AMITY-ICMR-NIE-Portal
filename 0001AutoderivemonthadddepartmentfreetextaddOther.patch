@@ -1,0 +1,139 @@
+From c74b28f8809fff9569caae04e74f19ddeba79506 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 9 Jun 2026 07:53:42 +0000
+Subject: [PATCH] Auto-derive month, add department free-text, add "Other" sex
+ option
+
+Three patient-intake form changes (no model retraining; .pth files untouched):
+
+- Month of Illness is now auto-derived from the Onset of Illness date and
+  shown as a read-only caption; the manual selectbox is removed. month stays
+  an int 1-12 so all downstream temporal feature engineering (season,
+  month_sin/cos, is_monsoon, district_month, etc.) is unchanged. year is
+  untouched.
+
+- Department "Other" now reveals a free-text "Specify Department" field,
+  persisted to the saved record as department_specification (mirrors the
+  existing syndrome_specification pattern). Category stays in department.
+
+- Sex gains an "Other" option (2) via a SEX_LABELS constant. SEX feeds only
+  the sex_respiratory interaction; preprocess_features sanitises any value
+  other than 0/1 to 0 on the model's local DataFrame, so predictions for
+  existing Female/Male data are completely unchanged while the UI and DB
+  record still keep "Other".
+
+https://claude.ai/code/session_014HDPmuGuqSWsHPmkq6rViq
+---
+ app.py           | 26 +++++++++++++++++---------
+ data_handler.py  |  3 ++-
+ model_handler.py |  8 ++++++++
+ 3 files changed, 27 insertions(+), 10 deletions(-)
+
+diff --git a/app.py b/app.py
+index 12dd45b..96b9998 100644
+--- a/app.py
++++ b/app.py
+@@ -51,6 +51,10 @@ SYMPTOM_DISPLAY_NAMES = {
+     'RETROORBITALPAIN': 'Retro-orbital Pain',
+ }
+ 
++# Sex encodings for the intake form. 0/1 match the training-data encoding used by
++# the models; 2 ("Other") is a UI/record-only value (sanitised before model input).
++SEX_LABELS = {0: "Female", 1: "Male", 2: "Other"}
++
+ # Database imports (minimal addition)
+ from data_handler import (
+     save_prediction_to_db,
+@@ -224,6 +228,13 @@ def main():
+         # Only two study-site options as requested
+         patient_data['hospital'] = st.sidebar.selectbox("Hospital", options=["MMC", "TMC"], index=0, key=widget_key('hospital'))
+         patient_data['department'] = st.sidebar.selectbox("Department", options=["Medicine", "Pediatrics", "Other"], index=0, key=widget_key('department'))
++        if patient_data['department'] == "Other":
++            patient_data['department_other_specification'] = st.sidebar.text_input(
++                "Specify Department", value="", key=widget_key('department_other'),
++                placeholder="Type the department name"
++            ).strip()
++        else:
++            patient_data['department_other_specification'] = ""
+         admission_date = st.sidebar.date_input("Date of Admission", value=datetime.now(), key=widget_key('date_of_admission'))
+         patient_data['date_of_admission'] = admission_date.strftime('%d-%m-%Y')
+         patient_data['patient_name'] = st.sidebar.text_input("Name of the Patient", value="", key=widget_key('patient_name'))
+@@ -263,8 +274,8 @@ def main():
+ 
+         # Remaining fields shown below the top requested order
+         patient_data['age'] = st.sidebar.number_input("Age (if age is less than 1, enter 0)", min_value=0, max_value=120, value=30, step=1, key=widget_key('age'))
+-        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1], 
+-                                format_func=lambda x: "Female" if x == 0 else "Male", index=1, key=widget_key('sex'))
++        patient_data['SEX'] = st.sidebar.selectbox("Sex", options=[0, 1, 2],
++                                format_func=lambda x: SEX_LABELS[x], index=1, key=widget_key('sex'))
+         patient_data['PATIENTTYPE'] = st.sidebar.selectbox("Patient Type", options=[0, 1], 
+                                     format_func=lambda x: "Outpatient" if x == 0 else "Inpatient", index=1, key=widget_key('patient_type'))
+         onset_date = st.sidebar.date_input("Onset of Illness", value=datetime.now(), key=widget_key('onset_of_illness'))
+@@ -273,12 +284,9 @@ def main():
+         patient_data['durationofillness'] = duration_of_illness
+         st.sidebar.caption(f"Duration of Illness (days): {duration_of_illness}")
+ 
+-        # Temporal features
+-        current_month = datetime.now().month
+-        patient_data['month'] = st.sidebar.selectbox("Month of Illness", options=list(range(1, 13)), 
+-                                  index=current_month - 1,  # index is 0-based
+-                      format_func=lambda x: datetime(2000, x, 1).strftime('%B'),
+-                      key=widget_key('month_of_illness'))
++        # Temporal features — Month of Illness is derived automatically from the Onset date
++        patient_data['month'] = onset_date.month
++        st.sidebar.caption(f"Month of Illness: {onset_date.strftime('%B')} (auto-filled from Onset date)")
+         # Year is fixed to 2015 for model input (hidden from UI)
+         patient_data['year'] = 2015
+ 
+@@ -494,7 +502,7 @@ def main():
+                         with st.expander("Input Summary"):
+                             st.write("**Patient Demographics:**")
+                             st.write(f"- Age: {patient_data['age']} years")
+-                            st.write(f"- Sex: {'Male' if patient_data['SEX'] == 1 else 'Female'}")
++                            st.write(f"- Sex: {SEX_LABELS.get(patient_data['SEX'], 'Unknown')}")
+                             st.write(f"- Patient Type: {'Inpatient' if patient_data['PATIENTTYPE'] == 1 else 'Outpatient'}")
+                             st.write(f"- Duration: {patient_data['durationofillness']} days")
+ 
+diff --git a/data_handler.py b/data_handler.py
+index 707b252..c7f27cd 100644
+--- a/data_handler.py
++++ b/data_handler.py
+@@ -132,6 +132,7 @@ class DataHandler:
+                 'patient_mrd_id': patient_data.get('patient_mrd_id', ''),
+                 'hospital': patient_data.get('hospital', ''),
+                 'department': patient_data.get('department', ''),
++                'department_specification': patient_data.get('department_other_specification', ''),
+                 'date_of_admission': patient_data.get('date_of_admission', ''),
+                 'patient_name': patient_data.get('patient_name', ''),
+                 'address_line': patient_data.get('address_line', ''),
+@@ -139,7 +140,7 @@ class DataHandler:
+ 
+                 # Remaining demographics and model-relevant fields
+                 'age': patient_data.get('age'),
+-                'sex': 'Male' if patient_data.get('SEX') == 1 else 'Female',
++                'sex': {0: 'Female', 1: 'Male', 2: 'Other'}.get(patient_data.get('SEX'), 'Unknown'),
+                 'patient_type': 'Inpatient' if patient_data.get('PATIENTTYPE') == 1 else 'Outpatient',
+                 'onset_of_illness': patient_data.get('onset_of_illness', ''),
+                 'duration_of_illness_days': patient_data.get('durationofillness'),
+diff --git a/model_handler.py b/model_handler.py
+index a32583b..4093333 100644
+--- a/model_handler.py
++++ b/model_handler.py
+@@ -531,6 +531,14 @@ class VirusPredictor:
+             le_dict = preprocessing.get('le_dict') or preprocessing.get('cat_encoders', {})
+ 
+             df = pd.DataFrame([patient_data])
++
++            # --- Sex safety: models were trained on Female(0)/Male(1) only. ---
++            # Map any other value (e.g. "Other" = 2) to 0 for MODEL INPUT ONLY, so the
++            # network never receives an out-of-distribution value. Female/Male rows are
++            # untouched -> accuracy on real data is unchanged. patient_data (and the saved
++            # DB record) keep the original value, so "Other" is still recorded correctly.
++            if 'SEX' in df.columns:
++                df['SEX'] = df['SEX'].where(df['SEX'].isin([0, 1]), 0)
+             
+             # ========== FEATURE ENGINEERING (to match training) ==========
+             
+-- 
+2.43.0
+
