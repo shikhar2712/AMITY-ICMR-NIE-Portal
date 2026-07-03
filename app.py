@@ -404,11 +404,11 @@ def main():
 
         patient_data = {}
 
-        # Top section order as requested in the specification image
-        # 1) Date of collection, 2) Patient study ID, 3) Patient MRD ID,
-        # 4) Hospital, 5) Department, 6) Date of admission, 7) Name,
-        # 8) Address (expandable), 9) Mobile no.
-        # Dates formatted as DD-MM-YYYY to match the requested format
+        # Field order (ICMR-specified):
+        # 1) Date of Collection, 2) Patient MRD ID, 3) Hospital,
+        # 4) Patient Study ID (auto, hospital-based), 5) Department,
+        # 6) Date of Admission, 7) Patient Name, 8) Address, 9) Mobile No.
+        # Dates formatted as DD-MM-YYYY to match the requested format.
         patient_data['date_of_collection'] = st.sidebar.date_input("Date of Collection", value=datetime.now(), key=widget_key('date_of_collection')).strftime('%d-%m-%Y')
         patient_data['patient_name'] = st.sidebar.text_input("Patient Name", value="", key=widget_key('patient_name'), placeholder="e.g., John Doe")
         patient_data['patient_mrd_id'] = st.sidebar.text_input("Patient MRD ID (e.g., A123456)", value="", key=widget_key('patient_mrd_id'))
