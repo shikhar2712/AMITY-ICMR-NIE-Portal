@@ -199,15 +199,25 @@ def refresh_virus_mappings(
 # Combined virus mapping for validation dropdown
 refresh_virus_mappings()
 
-# All clinical symptoms (no spaces to match training data)
+# All clinical symptoms (no spaces to match training data).
+# Ordered alphabetically by display name (see SYMPTOM_DISPLAY_NAMES in app.py)
+# since this list drives the checkbox order on the Prediction page.
 ALL_SYMPTOMS = [
-    'HEADACHE', 'IRRITABLITY', 'ALTEREDSENSORIUM', 'SOMNOLENCE', 'NECKRIGIDITY', 'SEIZURES',
-    'DIARRHEA', 'DYSENTERY', 'NAUSEA', 'VOMITING', 'ABDOMINALPAIN',
-    'MALAISE', 'MYALGIA', 'ARTHRALGIA', 'CHILLS', 'RIGORS', 'FEVER',
-    'BREATHLESSNESS', 'COUGH', 'RHINORRHEA', 'SORETHROAT',
-    'BULLAE', 'PAPULARRASH', 'PUSTULARRASH', 'MUSCULARRASH', 'MACULOPAPULARRASH', 'ESCHAR',
-    'DARKURINE', 'HEPATOMEGALY', 'JAUNDICE',
-    'REDEYE', 'DISCHARGEEYES', 'CRUSHINGEYES', 'SWELLINGEYES', 'RETROORBITALPAIN'
+    'ABDOMINALPAIN', 'ALTEREDSENSORIUM', 'ARTHRALGIA',
+    'BREATHLESSNESS', 'BULLAE',
+    'CHILLS', 'COUGH', 'CRUSHINGEYES',
+    'DARKURINE', 'DIARRHEA', 'DISCHARGEEYES', 'DYSENTERY',
+    'ESCHAR',
+    'FEVER',
+    'HEADACHE', 'HEPATOMEGALY',
+    'IRRITABLITY',
+    'JAUNDICE',
+    'MACULOPAPULARRASH', 'MALAISE', 'MUSCULARRASH', 'MYALGIA',
+    'NAUSEA', 'NECKRIGIDITY',
+    'PAPULARRASH', 'PUSTULARRASH',
+    'REDEYE', 'RETROORBITALPAIN', 'RHINORRHEA', 'RIGORS',
+    'SEIZURES', 'SOMNOLENCE', 'SORETHROAT', 'SWELLINGEYES',
+    'VOMITING'
 ]
 
 

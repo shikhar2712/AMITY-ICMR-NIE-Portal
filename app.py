@@ -154,7 +154,15 @@ def main():
         <script>
         (function() {
             function findArrow(doc) {
-                return doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
+                // stExpandSidebarButton only exists in the DOM while the sidebar
+                // is collapsed (re-expand control, always visible, top-left of
+                // the page). stSidebarCollapseButton lives inside the sidebar
+                // itself and slides off-screen with it when collapsed - without
+                // checking stExpandSidebarButton first, positioning would keep
+                // anchoring to that now off-screen element and push the home
+                // icon off-screen too.
+                return doc.querySelector('[data-testid="stExpandSidebarButton"]')
+                    || doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
                     || doc.querySelector('[data-testid="stSidebarCollapseButton"]')
                     || doc.querySelector('[data-testid="collapsedControl"]');
             }
@@ -204,8 +212,16 @@ def main():
                     if (arrow) {
                         const rect = arrow.getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
+                            // When the sidebar is expanded, its right edge sits
+                            // further right than the collapse arrow itself (the
+                            // arrow is inset from the sidebar's edge) - anchoring
+                            // off the arrow alone left the icon overlapping the
+                            // last ~20px of the sidebar. Clear whichever edge
+                            // (arrow or sidebar) extends furthest right.
+                            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+                            const sidebarRight = sidebar ? sidebar.getBoundingClientRect().right : 0;
                             icon.style.top = rect.top + 'px';
-                            icon.style.left = (rect.right + 10) + 'px';
+                            icon.style.left = (Math.max(rect.right, sidebarRight) + 10) + 'px';
                             return;
                         }
                     }
@@ -256,10 +272,13 @@ def main():
     st.markdown(
         """
         <style>
-        /* "Navigation" title: margin-top/bottom = space above/below it */
+        /* "Navigation" title: margin-top/bottom = space above/below it.
+           Keep margin-top above -24px: any more negative pulls the title up
+           into the sidebar's built-in collapse-arrow row (top:16-44px), which
+           then sits on top of the arrow and silently swallows its clicks. */
         section[data-testid="stSidebar"] h1 {
-            margin-top: -77px;      /* + moves title down, - moves it up */
-            margin-bottom: 121px;   /* space between title and first button */
+            margin-top: -20px;      /* + moves title down, - moves it up */
+            margin-bottom: 64px;    /* space between title and first button */
         }
         /* Each nav button (Dashboard / Prediction / View Records / About) */
         section[data-testid="stSidebar"] div[data-testid="stButton"] button {
