@@ -154,7 +154,13 @@ def main():
         <script>
         (function() {
             function findArrow(doc) {
-                return doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
+                // stExpandSidebarButton is the re-expand control shown only while
+                // the sidebar is collapsed; it stays on-screen (top-left) whereas
+                // stSidebarCollapseButton slides off-screen with the collapsed
+                // sidebar. Check it first so the Home icon stays visible when
+                // collapsed instead of being anchored to an off-screen element.
+                return doc.querySelector('[data-testid="stExpandSidebarButton"]')
+                    || doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
                     || doc.querySelector('[data-testid="stSidebarCollapseButton"]')
                     || doc.querySelector('[data-testid="collapsedControl"]');
             }
