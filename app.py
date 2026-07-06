@@ -154,7 +154,13 @@ def main():
         <script>
         (function() {
             function findArrow(doc) {
-                return doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
+                // stExpandSidebarButton is the re-expand control shown only while
+                // the sidebar is collapsed; it stays on-screen (top-left) whereas
+                // stSidebarCollapseButton slides off-screen with the collapsed
+                // sidebar. Check it first so the Home icon stays visible when
+                // collapsed instead of being anchored to an off-screen element.
+                return doc.querySelector('[data-testid="stExpandSidebarButton"]')
+                    || doc.querySelector('[data-testid="stSidebarCollapsedControl"]')
                     || doc.querySelector('[data-testid="stSidebarCollapseButton"]')
                     || doc.querySelector('[data-testid="collapsedControl"]');
             }
@@ -204,8 +210,16 @@ def main():
                     if (arrow) {
                         const rect = arrow.getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
+                            // The collapse arrow is inset ~30px from the sidebar's
+                            // right edge, so anchoring off the arrow alone left the
+                            // icon overlapping the sidebar by ~20px when expanded.
+                            // Anchor off whichever edge is further right (arrow or
+                            // sidebar) so the icon clears the sidebar in both the
+                            // expanded and collapsed states.
+                            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+                            const sidebarRight = sidebar ? sidebar.getBoundingClientRect().right : 0;
                             icon.style.top = rect.top + 'px';
-                            icon.style.left = (rect.right + 10) + 'px';
+                            icon.style.left = (Math.max(rect.right, sidebarRight) + 10) + 'px';
                             return;
                         }
                     }
