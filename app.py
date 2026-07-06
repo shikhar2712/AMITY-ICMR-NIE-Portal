@@ -256,10 +256,15 @@ def main():
     st.markdown(
         """
         <style>
-        /* "Navigation" title: margin-top/bottom = space above/below it */
+        /* "Navigation" title: margin-top/bottom = space above/below it.
+           margin-top must stay small enough that the title's (full-width) box
+           does not cover the sidebar's built-in collapse-arrow row (top 16-44px);
+           at -77px it did, and the title silently swallowed the arrow's clicks.
+           margin-bottom is reduced by the same amount so the total footprint
+           (-20 + height + 64) is unchanged and the nav buttons below do not move. */
         section[data-testid="stSidebar"] h1 {
-            margin-top: -77px;      /* + moves title down, - moves it up */
-            margin-bottom: 121px;   /* space between title and first button */
+            margin-top: -20px;      /* + moves title down, - moves it up */
+            margin-bottom: 64px;    /* space between title and first button */
         }
         /* Each nav button (Dashboard / Prediction / View Records / About) */
         section[data-testid="stSidebar"] div[data-testid="stButton"] button {
