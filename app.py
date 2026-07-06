@@ -547,11 +547,20 @@ def main():
         st.header("Clinical Symptoms")
         st.write("Select all symptoms present in the patient:")
 
-        # Display all symptoms in a simple grid layout
+        # Display all symptoms in a simple grid layout, alphabetized by the
+        # label the clinician sees. This is a display-only sorted copy; it does
+        # NOT mutate ALL_SYMPTOMS (imported from model_handler) and does not
+        # affect prediction, which reads features by column name, not order.
+        def _symptom_display_name(symptom):
+            return SYMPTOM_DISPLAY_NAMES.get(symptom, symptom.replace('_', ' ').title())
+
+        symptoms_in_display_order = sorted(
+            ALL_SYMPTOMS, key=lambda s: _symptom_display_name(s).lower()
+        )
         cols = st.columns(4)  # 4 columns for better space utilization
-        for idx, symptom in enumerate(ALL_SYMPTOMS):
+        for idx, symptom in enumerate(symptoms_in_display_order):
             with cols[idx % 4]:
-                display_name = SYMPTOM_DISPLAY_NAMES.get(symptom, symptom.replace('_', ' ').title())
+                display_name = _symptom_display_name(symptom)
                 patient_data[symptom] = 1 if st.checkbox(display_name, key=widget_key(symptom)) else 0
 
         st.markdown("---")
